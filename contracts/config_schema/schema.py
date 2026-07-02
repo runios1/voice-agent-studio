@@ -82,8 +82,19 @@ class Disclosure(BaseModel):
     disclosure_script: Optional[str] = None            # DEFAULT
 
 
+class VoicemailBehavior(BaseModel):
+    # What the agent does when nobody picks up. Required for a deployable agent — an
+    # agent that dials strangers must know this. (v1 minimal; will grow post-Phase-1.)
+    action: Literal["leave_message", "hang_up"] = "hang_up"  # OPEN, required_for_ready
+    message: Optional[str] = None                            # OPEN, used if leave_message
+
+
 class ConversationConfig(BaseModel):
     persona: Persona = Field(default_factory=Persona)
+    # How the agent opens a call — who it is / why it's calling. Required: an agent
+    # that dials strangers must know how to start.
+    opening: Optional[str] = None                      # OPEN, required_for_ready
+    voicemail: VoicemailBehavior = Field(default_factory=VoicemailBehavior)
     primary_objective: Optional[str] = None            # DEFAULT e.g. "book a 15-min discovery call"
     qualification: Qualification = Field(default_factory=Qualification)
     objections: list[Objection] = Field(default_factory=list)

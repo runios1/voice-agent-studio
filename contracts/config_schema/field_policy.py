@@ -63,6 +63,8 @@ FIELD_POLICY: list[FieldPolicy] = [
     # --- user-owned details; the completeness model (required_for_ready) ---
     FieldPolicy(path="conversation.persona.role",          owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=True),
     FieldPolicy(path="conversation.persona.tone",          owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=True),
+    FieldPolicy(path="conversation.opening",               owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=True),
+    FieldPolicy(path="conversation.voicemail.action",      owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=True),
     FieldPolicy(path="conversation.primary_objective",     owner_layer=Layer.USER, mutability=Mutability.DEFAULT, required_for_ready=True),
     FieldPolicy(path="conversation.qualification.criteria", owner_layer=Layer.USER, mutability=Mutability.OPEN,   required_for_ready=True),
     FieldPolicy(path="conversation.objections",            owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=False),
