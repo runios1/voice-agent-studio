@@ -36,12 +36,14 @@ picture in mind and flag any choice that would cap a future capability.
   the right models with no random errors. A built agent can be tested in a **text
   preview**. No real telephony, no real tools yet — but the architecture slots them
   in without a rewrite.
-- **Phase 2: thicken the runtime loop.** Swap the preview's text I/O for a
-  **voice framework** (LiveKit / Vapi / Retell — model-agnostic) + the Gemini Live
-  API; add **in-call functions** (calendar, lead lookup) with their guardrails
-  enforced in code.
-- **Phase 3: async orchestration.** n8n-style post-call workflows (confirmations,
-  CRM writes, follow-up sequences, no-answer retries).
+- **Phase 2: tooling + bounded autonomy + dashboard** (full plan:
+  `docs/phase2-plan.md`, decisions P2-D1…P2-D6). Real voice (managed platform +
+  Gemini Live) with in-call functions; **bounded autonomy** (human authorizes a
+  campaign, agent runs it unsupervised with a 4-layer kill switch); a **platform
+  tool registry** + per-tenant OAuth (guardrails at the tool boundary); async
+  post-call workflows (pulled in from the old Phase 3); and a **dashboard** over a
+  **structured event stream** that also powers auto-pause and the compliance audit
+  log. Runtime provider stays behind an interface (Retell → LiveKit swap).
 
 ## 3. The agent model (the keystone)
 

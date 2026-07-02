@@ -25,6 +25,7 @@ from contracts.config_schema.schema import AgentStatus
 from contracts.model_wrapper.interface import Message, ModelResponse, ModelWrapper, ToolCall
 
 from . import tools
+from .completeness import describe_gap, remaining_gaps
 from .events import BuilderEvent, NoticeEvent, PatchEvent, TokenEvent
 from .gate import Gate, GateAccepted, GateError, get_by_path
 from .interviewer import build_system_prompt
@@ -166,10 +167,15 @@ class BuilderLoop:
         rejected: list[tuple[ToolCall, GateError]],
     ) -> str:
         """Generate the spoken reply for a turn whose model response was tool-calls
-        only. Feeds the model a summary of what was saved (with the system prompt
-        recompiled from the NOW-updated config, so it asks the right next question)
-        and calls it WITHOUT tools to force natural language. Falls back to a
-        deterministic line so the user is never met with silence (D-reliability)."""
+        only. The builder is a GOAL-SEEKING interviewer (D12): it confirms what it
+        saved and then asks about the SPECIFIC next required field still missing —
+        it does not just make open-ended conversation. The next gap is computed in
+        CODE from the (now-updated) config, so both the model nudge and the
+        deterministic fallback stay on-goal even if the model turn comes back empty."""
+        config = self._gate.get_config(agent_id)
+        gaps = remaining_gaps(config)
+        next_gap = gaps[0] if gaps else None
+
         notes: list[str] = []
         if applied:
             recorded = "; ".join(f"{a.patch.path} = {a.patch.value!r}" for a in applied)
@@ -178,17 +184,25 @@ class BuilderLoop:
             notes.append(f"Could not apply {call.name}: {err.message}")
         result = " ".join(notes) if notes else "No changes were made this turn."
 
-        system = Message(
-            role="system", content=build_system_prompt(self._gate.get_config(agent_id))
-        )
-        nudge = Message(
-            role="tool",
-            content=(
-                f"{result} Now reply to the user in one or two short, friendly "
-                "sentences: confirm what you just captured and ask about the next "
-                "missing item. Do not call any tools — just talk."
-            ),
-        )
+        if next_gap is not None:
+            directive = (
+                f"{result} Reply to the user in ONE or two short sentences: briefly "
+                f"confirm what you captured, then ask specifically about the NEXT "
+                f"missing detail — {describe_gap(next_gap)}. Ask about that one thing "
+                f"only, as a natural question. Do not call any tools; just talk."
+            )
+        else:
+            directive = (
+                f"{result} Every required field is now filled — the agent is "
+                f"deploy-ready. In one or two short sentences, tell the user it's "
+                f"ready to test in Preview and offer to add optional detail (objection "
+                f"handling, style notes). Do not call any tools."
+            )
+
+        system = Message(role="system", content=build_system_prompt(config))
+        # A plain user-role instruction: the model reliably answers it with text,
+        # where a "[tool result]"-prefixed turn sometimes came back empty.
+        nudge = Message(role="user", content=directive)
         try:
             resp = await self._model.complete(
                 [system, *session.history, nudge], model_tier="frontier"
@@ -198,11 +212,17 @@ class BuilderLoop:
                 return text
         except Exception:
             pass  # never surface a stack trace; use the deterministic fallback below
+
+        # Deterministic fallback — still goal-directed: name the next gap explicitly.
         if rejected:
             return rejected[0][1].message
-        if applied:
-            return "Got it — I've noted that. What would you like to set next?"
-        return "Got it. What would you like to work on next?"
+        lead = "Got it — saved." if applied else "Okay."
+        if next_gap is not None:
+            return f"{lead} Next, let's cover {describe_gap(next_gap)}."
+        return (
+            f"{lead} That's everything required — your agent is ready to test in "
+            "Preview. Want to add objection handling or style notes?"
+        )
 
     # ----------------------------------------------------------------------- #
     # Tool-call routing. Every write goes through the gate (never direct).
