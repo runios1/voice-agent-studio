@@ -1,0 +1,6 @@
+# WS2 — config gate + persistence
+pydantic>=2.0          # schema validation (frozen contract uses pydantic v2)
+fastapi>=0.110         # thin HTTP router (api.py)
+httpx                  # required by fastapi.testclient (tests)
+# Production storage only — NOT needed for CI/import (imported lazily):
+# psycopg[binary]>=3    # PostgresConfigRepository
