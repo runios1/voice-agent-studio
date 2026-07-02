@@ -70,6 +70,18 @@ export interface AgentState {
 let idSeq = 0;
 const nextId = (p: string) => `${p}-${++idSeq}`;
 
+/**
+ * The builder's opening message. Deliberately STATIC and rendered client-side, so
+ * it appears instantly and — crucially — survives a refresh or a new window. A
+ * model-generated greeting depended on server session state (an empty-message turn
+ * returned nothing once the session already had history), which left the chat blank
+ * after a reload. A fixed first line is reliable and costs nothing.
+ */
+export const BUILDER_GREETING =
+  "Hi! I'm your build assistant — I'll turn what you tell me into a working voice " +
+  "SDR agent. To start: who will it be calling on behalf of, and what should it do " +
+  "on the call (its role and goal)?";
+
 /** Seed which user fields are already "decided" from a loaded config. Only strings
  * and non-empty lists auto-materialize; enums/bools/numbers/objects with schema
  * defaults must be explicitly patched to appear (no empty-selector-before-answer). */
@@ -298,8 +310,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
   startBuilder: async () => {
     if (get().builderOpened) return;
-    set({ builderOpened: true });
-    await runBuilderTurn("", true);
+    // Seed the greeting synchronously and client-side: instant, refresh-safe, no
+    // backend round-trip. The user answers this and the real builder loop takes
+    // over from their first message.
+    set((s) => ({
+      builderOpened: true,
+      messages: s.messages.length
+        ? s.messages
+        : [{ id: nextId("greet"), role: "assistant", text: BUILDER_GREETING }],
+    }));
   },
 
   startPreview: async () => {
