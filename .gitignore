@@ -10,6 +10,7 @@ node_modules/
 dist/
 build/
 .vite/
+*.tsbuildinfo
 
 # Env & secrets — NEVER commit. Also never let these reach a model context.
 .env
