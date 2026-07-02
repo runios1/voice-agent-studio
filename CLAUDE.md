@@ -163,6 +163,12 @@ Parallel work is earned by **frozen contracts**. Tiny critical path, wide fan-ou
 contract is a cross-cutting event — announce it. Each workstream README lists its
 **boundaries** (what NOT to do) precisely so parallel streams don't collide.
 
+**Dispatching the work:** `docs/workstream-prompts.md` is the dispatch kit — a
+shared prompt template + per-stream inserts + the integration/E2E protocol
+(merge order **6 → 5 → 2 → {3,4} → 1**). Contracts must be **frozen** before
+dispatch. A stream that finds a contract insufficient files a
+`docs/contract-change-requests/` entry rather than editing the contract.
+
 ## 9. Conventions
 
 - Never commit secrets; never let secrets/infra detail reach a model's context.
