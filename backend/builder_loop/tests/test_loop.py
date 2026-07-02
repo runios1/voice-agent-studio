@@ -37,6 +37,7 @@ def test_conversation_drives_empty_to_ready(fresh_config):
         resp("Nice opener.", [tc(tools.SET_FIELD, path="conversation.opening", value="Hi, this is Ada from Acme.")]),
         resp("Good goal.", [tc(tools.SET_FIELD, path="conversation.primary_objective", value="book a 15-min discovery call")]),
         resp("Added that criterion.", [tc(tools.ADD_QUALIFICATION_CRITERION, label="budget", question="What's your budget?")]),
+        resp("Voicemail set.", [tc(tools.SET_FIELD, path="conversation.voicemail.action", value="hang_up")]),
     ]
     loop, gate = make_loop(script, fresh_config)
 
@@ -46,6 +47,7 @@ def test_conversation_drives_empty_to_ready(fresh_config):
         "Open with who we are.",
         "Goal is to book a discovery call.",
         "Qualify on budget.",
+        "If no one picks up, just hang up.",
     ]
 
     all_events = []

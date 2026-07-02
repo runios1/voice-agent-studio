@@ -16,8 +16,8 @@ def test_fresh_agent_is_draft(service, agent_id):
 def test_missing_lists_the_unfilled_required_fields(service, agent_id):
     config = service.get_agent(agent_id, USER)
     missing = missing_required(config)
-    # voicemail.action is satisfied by default; the other five are not.
-    assert "conversation.voicemail.action" not in missing
+    # voicemail.action now defaults to None (undecided), so it is a genuine gap.
+    assert "conversation.voicemail.action" in missing
     assert "conversation.persona.role" in missing
     assert "conversation.qualification.criteria" in missing
 

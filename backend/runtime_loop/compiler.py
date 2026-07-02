@@ -149,8 +149,8 @@ def _role_section(conv: ConversationConfig, *, opening_turn: bool = False) -> st
             olines.append(f'  - If they say "{o.trigger}": {o.response_guidance}')
         lines.append("\n".join(olines))
 
-    # Whether any *identity/goal* content was configured (voicemail always has a
-    # default, so it doesn't count toward "the agent has been given a role yet").
+    # Whether any *identity/goal* content was configured (voicemail is appended
+    # below and doesn't count toward "the agent has been given a role yet").
     has_role_content = len(lines) > 1
 
     vm = conv.voicemail
@@ -158,6 +158,8 @@ def _role_section(conv: ConversationConfig, *, opening_turn: bool = False) -> st
         msg = f' Leave this message: "{vm.message}"' if vm.message else ""
         lines.append(f"If you reach voicemail, leave a brief message.{msg}")
     else:
+        # Covers both an explicit "hang_up" and an as-yet-undecided None: the safe
+        # runtime default is to hang up without leaving a message.
         lines.append("If you reach voicemail, hang up without leaving a message.")
 
     # Free-text pocket — persona flavor only, never a capability grant.

@@ -19,6 +19,7 @@ from contracts.config_schema.schema import (
     Persona,
     Qualification,
     QualificationCriterion,
+    VoicemailBehavior,
 )
 
 
@@ -51,6 +52,7 @@ def sample_ready_config(
                 style_notes="Never talk over the prospect; ask one question at a time.",
             ),
             opening="Introduce yourself and Acme, and ask if it's a good time to talk.",
+            voicemail=VoicemailBehavior(action="hang_up"),
             primary_objective="book a 15-minute discovery call",
             qualification=Qualification(
                 framework="BANT",

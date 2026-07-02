@@ -54,7 +54,7 @@ export function makeSeededDraft(id = "agent-demo"): AgentConfig {
     conversation: {
       persona: { display_name: null, role: null, tone: null, style_notes: null },
       opening: null,
-      voicemail: { action: "hang_up", message: null },
+      voicemail: { action: null, message: null },
       primary_objective: null,
       qualification: { framework: "BANT", criteria: [] },
       objections: [],

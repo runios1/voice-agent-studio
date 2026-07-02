@@ -5,9 +5,9 @@ builder interviews toward. When every one is satisfied, `meta.status` flips to
 READY. This module is that evaluation, and nothing else decides READY-ness.
 
 "Satisfied" is intentionally strict-but-simple: a field counts as filled when it
-is present and non-empty — None, "", "  ", and [] do NOT count. Enum fields with
-a schema default (e.g. voicemail.action defaults to "hang_up") are therefore
-always satisfied, which is correct: the agent has a defined behavior.
+is present and non-empty — None, "", "  ", and [] do NOT count. Enum fields carry
+a concrete value only once chosen; those that default to None (e.g. voicemail.action)
+stay unsatisfied until answered, so the builder genuinely interviews toward them.
 """
 
 from __future__ import annotations

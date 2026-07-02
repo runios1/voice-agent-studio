@@ -69,7 +69,7 @@ export interface Disclosure {
 export type VoicemailAction = "leave_message" | "hang_up";
 
 export interface VoicemailBehavior {
-  action: VoicemailAction;
+  action: VoicemailAction | null; // null = undecided (a required gap the builder asks about)
   message?: string | null;
 }
 

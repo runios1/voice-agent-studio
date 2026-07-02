@@ -84,8 +84,12 @@ class Disclosure(BaseModel):
 
 class VoicemailBehavior(BaseModel):
     # What the agent does when nobody picks up. Required for a deployable agent — an
-    # agent that dials strangers must know this. (v1 minimal; will grow post-Phase-1.)
-    action: Literal["leave_message", "hang_up"] = "hang_up"  # OPEN, required_for_ready
+    # agent that dials strangers must know this. Default is None (UNDECIDED) rather
+    # than a silent "hang_up", so the builder actually asks and completeness counts
+    # it as a genuine gap (CCR ws1: an enum default masqueraded as an answer, so the
+    # field was never interviewed and the panel could never reach done). The runtime
+    # falls back to hang_up if it is still None. (v1 minimal; grows post-Phase-1.)
+    action: Optional[Literal["leave_message", "hang_up"]] = None  # OPEN, required_for_ready
     message: Optional[str] = None                            # OPEN, used if leave_message
 
 

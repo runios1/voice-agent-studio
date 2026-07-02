@@ -96,6 +96,11 @@ function FieldEditor({
         value={asText}
         onChange={(e) => onCommit(path, e.target.value)}
       >
+        {!asText && (
+          <option value="" disabled>
+            Choose…
+          </option>
+        )}
         {meta.editor.options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
