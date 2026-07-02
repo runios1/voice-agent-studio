@@ -34,7 +34,11 @@ module structure, edge cases within your boundary. Do NOT grill the settled D0�
 architecture. One question at a time, each with your recommended answer. Suggested
 topics: <GRILL_TOPICS>. If I say "you decide," take your recommendation and move on.
 
-STEP 2 — BRANCH. `git checkout -b ws/<N>-<slug>` off main. All work stays here.
+STEP 2 — ISOLATE (worktree + branch). From the main repo root, on an up-to-date
+main, create your own worktree so no other worker shares your files:
+    git worktree add ../vas-ws-<N>-<slug> -b ws/<N>-<slug>
+Then cd ../vas-ws-<N>-<slug> and do ALL work there. The integrator removes the
+worktree after merge.
 
 STEP 3 — BUILD WITHIN YOUR BOUNDARY. Implement ONLY this workstream's
 responsibility; respect the "do NOT" boundaries in your README. Reach other streams

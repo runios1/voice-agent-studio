@@ -165,11 +165,13 @@ Parallel work is earned by **frozen contracts**. Tiny critical path, wide fan-ou
 contract is a cross-cutting event — announce it. Each workstream README lists its
 **boundaries** (what NOT to do) precisely so parallel streams don't collide.
 
-**Dispatching the work:** `docs/workstream-prompts.md` is the dispatch kit — a
-shared prompt template + per-stream inserts + the integration/E2E protocol
-(merge order **6 → 5 → 2 → {3,4} → 1**). Contracts must be **frozen** before
-dispatch. A stream that finds a contract insufficient files a
-`docs/contract-change-requests/` entry rather than editing the contract.
+**Dispatching the work:** dispatch kits — `docs/workstream-prompts.md` (Phase 1)
+and `docs/phase2-workstream-prompts.md` (Phase 2) — hold a shared prompt template +
+per-stream inserts + the integration/E2E protocol. **Each worker runs in its own
+git worktree + branch** (`git worktree add ../vas-<...> -b <...>`) so no two workers
+share a working copy; the integrator merges and removes worktrees in dependency
+order. Contracts must be **frozen** before dispatch. A stream that finds a contract
+insufficient files a `docs/contract-change-requests/` entry rather than editing it.
 
 ## 9. Conventions
 
