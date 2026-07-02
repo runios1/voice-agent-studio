@@ -57,7 +57,14 @@ export function createHttpAgentApi(baseUrl = "/api"): AgentApi {
       credentials: "same-origin",
     });
     if (!res.ok) throw await toFailure(res);
-    return (await res.json()) as AgentEnvelope;
+    // The gate returns the resolved policy under `field_policy` (api_contract left
+    // the key unpinned); normalize to our internal envelope shape.
+    const body = (await res.json()) as {
+      config: AgentEnvelope["config"];
+      field_policy?: AgentEnvelope["policy"];
+      policy?: AgentEnvelope["policy"];
+    };
+    return { config: body.config, policy: body.field_policy ?? body.policy ?? [] };
   }
 
   async function patchField(
@@ -75,7 +82,11 @@ export function createHttpAgentApi(baseUrl = "/api"): AgentApi {
       },
     );
     if (!res.ok) throw await toFailure(res);
-    return (await res.json()) as ConfigPatch;
+    // The gate wraps the accepted mutation as {patch:{path,value}, config, ...};
+    // unwrap to the ConfigPatch the store applies. (Fallback: a bare {path,value}.)
+    const body = (await res.json()) as { patch?: ConfigPatch } & Partial<ConfigPatch>;
+    if (body.patch) return body.patch;
+    return { path: body.path as string, value: body.value };
   }
 
   async function* stream(
