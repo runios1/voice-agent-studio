@@ -17,6 +17,23 @@ def test_persona_and_goal_render_into_prompt():
     assert "We already use a competitor" in prompt
 
 
+def test_opening_line_only_renders_on_the_opening_turn():
+    """Regression: the opening line was rendered every turn, so the agent re-greeted
+    endlessly. It must appear only on the opening turn; later turns are told not to
+    re-open, and the code-emitted disclosure must not be echoed by the model."""
+    config = sample_ready_config()
+    config.conversation.opening = "Hi, this is Riley from Acme, do you have 30 seconds?"
+
+    opener = compile_system_prompt(config, opening_turn=True)
+    later = compile_system_prompt(config, opening_turn=False)
+
+    assert "this is Riley from Acme" in opener  # opening guidance present on turn 1
+    assert "this is Riley from Acme" not in later  # never repeated after that
+    assert "already in progress" in later  # later turns told to continue, not re-open
+    # both turns tell the model the disclosure was already delivered by the system
+    assert "been delivered" in opener and "been delivered" in later
+
+
 def test_locked_guardrails_precede_user_persona():
     prompt = compile_system_prompt(sample_ready_config())
     guardrail_idx = prompt.index("PLATFORM GUARDRAILS (LOCKED)")

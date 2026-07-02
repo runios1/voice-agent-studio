@@ -54,6 +54,18 @@ class BuilderLoop:
 
     async def run_turn(self, agent_id: str, user_text: str) -> AsyncIterator[BuilderEvent]:
         session = self._sessions.load(agent_id)
+
+        # Empty turn on a fresh session = the builder OPENS the conversation (greets
+        # and asks the first question) rather than waiting for the user to start.
+        if not user_text.strip():
+            if not session.history:
+                opening = await self._compose_opening(agent_id, session)
+                for chunk in _tokenize(opening):
+                    yield TokenEvent(text=chunk)
+                session.history.append(Message(role="assistant", content=opening))
+                self._sessions.save(session)
+            return
+
         session.history.append(Message(role="user", content=user_text))
 
         # System prompt reflects the CURRENT config (its remaining gaps steer the ask).
@@ -117,6 +129,34 @@ class BuilderLoop:
 
         session.history.append(Message(role="assistant", content=final_text))
         self._sessions.save(session)
+
+    async def _compose_opening(self, agent_id: str, session: BuilderSession) -> str:
+        """The builder's first message: greet and ask the first question. Tool-free
+        (nothing to record yet); the system prompt already carries the completeness
+        gaps so the model asks about the right thing first. Deterministic fallback so
+        the chat is never blank on load."""
+        system = Message(
+            role="system", content=build_system_prompt(self._gate.get_config(agent_id))
+        )
+        nudge = Message(
+            role="user",
+            content=(
+                "Start the conversation. In one or two short, friendly sentences, "
+                "greet me, say you'll help me build my voice SDR agent, and ask the "
+                "first question toward that. Do not call any tools yet."
+            ),
+        )
+        try:
+            resp = await self._model.complete([system, nudge], model_tier="frontier")
+            text = (resp.text or "").strip()
+            if text:
+                return text
+        except Exception:
+            pass
+        return (
+            "Hi! I'll help you build your voice SDR agent. To start — what's its role, "
+            "and which company will it be calling on behalf of?"
+        )
 
     async def _compose_reply(
         self,

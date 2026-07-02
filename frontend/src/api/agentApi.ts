@@ -39,10 +39,16 @@ export interface AgentApi {
     signal?: AbortSignal,
   ): AsyncGenerator<RawSseEvent>;
 
-  /** POST /agents/{id}/preview/messages (SSE) — token events (talk TO the agent). */
+  /**
+   * POST /agents/{id}/preview/messages (SSE) — talk TO the agent. `sessionId`
+   * continues an existing preview thread (the server emits a `session` event with
+   * the id to echo back); omit it / pass null to start a new session. An empty
+   * `message` on a fresh session is the agent OPENING the call.
+   */
   openPreviewStream(
     id: string,
     message: string,
+    sessionId?: string | null,
     signal?: AbortSignal,
   ): AsyncGenerator<RawSseEvent>;
 }
@@ -91,14 +97,14 @@ export function createHttpAgentApi(baseUrl = "/api"): AgentApi {
 
   async function* stream(
     path: string,
-    message: string,
+    body: Record<string, unknown>,
     signal?: AbortSignal,
   ): AsyncGenerator<RawSseEvent> {
     const res = await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       credentials: "same-origin",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(body),
       signal,
     });
     if (!res.ok || !res.body) throw await toFailure(res);
@@ -109,9 +115,13 @@ export function createHttpAgentApi(baseUrl = "/api"): AgentApi {
     getAgent,
     patchField,
     openBuilderStream: (id, message, signal) =>
-      stream(`/agents/${encodeURIComponent(id)}/builder/messages`, message, signal),
-    openPreviewStream: (id, message, signal) =>
-      stream(`/agents/${encodeURIComponent(id)}/preview/messages`, message, signal),
+      stream(`/agents/${encodeURIComponent(id)}/builder/messages`, { message }, signal),
+    openPreviewStream: (id, message, sessionId, signal) =>
+      stream(
+        `/agents/${encodeURIComponent(id)}/preview/messages`,
+        { message, session_id: sessionId ?? null },
+        signal,
+      ),
   };
 }
 

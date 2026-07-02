@@ -98,13 +98,29 @@ export function createMockAgentApi(agentId = "agent-demo"): AgentApi {
     return { path, value };
   }
 
-  async function* openBuilderStream(): AsyncGenerator<RawSseEvent> {
-    const s = SCRIPT[Math.min(step, SCRIPT.length - 1)];
-    step++;
-    for (const word of s.reply.split(" ")) {
+  async function* stream(text: string): AsyncGenerator<RawSseEvent> {
+    for (const word of text.split(" ")) {
       await delay(18);
       yield { event: "token", data: { text: word + " " } };
     }
+  }
+
+  async function* openBuilderStream(
+    _id: string,
+    message: string,
+  ): AsyncGenerator<RawSseEvent> {
+    // Empty message on a fresh session = the builder opens the conversation.
+    if (!message.trim() && step === 0) {
+      yield* stream(
+        "Hi! I'll help you build your voice SDR agent. To start — what's its " +
+          "role, and which company will it be calling on behalf of?",
+      );
+      yield { event: "done", data: {} };
+      return;
+    }
+    const s = SCRIPT[Math.min(step, SCRIPT.length - 1)];
+    step++;
+    yield* stream(s.reply);
     if (s.patch) yield { event: "patch", data: s.patch };
     if (s.notice) yield { event: "notice", data: { message: s.notice } };
     yield { event: "done", data: {} };
@@ -113,12 +129,22 @@ export function createMockAgentApi(agentId = "agent-demo"): AgentApi {
   async function* openPreviewStream(
     _id: string,
     message: string,
+    _sessionId?: string | null,
   ): AsyncGenerator<RawSseEvent> {
-    const reply = `Hi! I'm an AI assistant calling on behalf of Acme. You said: "${message}". Is now a good time for a quick 30 seconds?`;
-    for (const word of reply.split(" ")) {
-      await delay(18);
-      yield { event: "token", data: { text: word + " " } };
+    yield { event: "session", data: { session_id: "mock-session" } };
+    if (!message.trim()) {
+      // The agent opens the call (disclosure + opening, spoken first).
+      yield* stream(
+        "Hi, I'm an AI assistant calling on behalf of Acme. Do you have 30 " +
+          "seconds to chat?",
+      );
+      yield { event: "done", data: {} };
+      return;
     }
+    yield* stream(
+      `Thanks for letting me know. Would you be open to a quick 15-minute demo ` +
+        `to see if Acme's a fit?`,
+    );
     yield { event: "done", data: {} };
   }
 

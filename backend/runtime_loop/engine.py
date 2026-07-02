@@ -68,15 +68,22 @@ class RuntimeEngine:
         session: PreviewSession,
         user_text: str,
     ) -> AsyncIterator[TurnEvent]:
-        """Stream the agent's reply to one user turn.
+        """Stream the agent's reply to one user turn — OR open the call.
+
+        An outbound SDR speaks first, so an empty `user_text` on a fresh session is
+        the AGENT'S OPENING: the code-emitted disclosure fires, then the model
+        delivers its opening line, and no user turn is recorded. Otherwise this is a
+        normal reply to the user's turn.
 
         Yields `token` events (disclosure prefix first, if due, then model tokens)
         and a final `done`. The full agent utterance is recorded to session history
         as a single assistant turn.
         """
-        session.add("user", user_text)
+        opening_turn = not user_text.strip() and not session.messages
+        if not opening_turn:
+            session.add("user", user_text)
 
-        system_prompt = compile_system_prompt(config)
+        system_prompt = compile_system_prompt(config, opening_turn=opening_turn)
         tools = build_tools(config, include_declared=self.expose_declared_tools)
 
         utterance_parts: list[str] = []
@@ -91,7 +98,14 @@ class RuntimeEngine:
 
         # --- Model turn ---
         messages: list[Message] = [Message(role="system", content=system_prompt)]
-        messages.extend(session.messages)
+        if opening_turn:
+            # No user turn to react to; nudge the model to deliver its opening. The
+            # nudge is not persisted, so history stays a clean agent/user transcript.
+            messages.append(
+                Message(role="user", content="Begin the call now with your opening.")
+            )
+        else:
+            messages.extend(session.messages)
 
         async for chunk in self.wrapper.stream(
             messages, tools=tools, model_tier=self.model_tier

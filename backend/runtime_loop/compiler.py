@@ -24,15 +24,21 @@ from __future__ import annotations
 from contracts.config_schema.schema import AgentConfig, ConversationConfig, ComplianceGuardrails
 
 
-def compile_system_prompt(config: AgentConfig) -> str:
+def compile_system_prompt(config: AgentConfig, *, opening_turn: bool = False) -> str:
     """Assemble the runtime system prompt for the preview/voice agent.
 
     Sections, in precedence order: locked guardrails -> user-configured role ->
-    lock footer. `wishlist` is intentionally excluded.
+    conversation directives -> lock footer. `wishlist` is intentionally excluded.
+
+    `opening_turn` = this is the agent's FIRST utterance (an outbound SDR opens the
+    call). It controls whether the model is told to deliver its opening or to just
+    continue an in-progress conversation, so the opening line isn't repeated every
+    turn and the code-emitted disclosure isn't echoed by the model.
     """
     sections: list[str] = [
         _guardrail_section(config.guardrails, config.conversation),
-        _role_section(config.conversation),
+        _role_section(config.conversation, opening_turn=opening_turn),
+        _conversation_directives(opening_turn),
         _lock_footer(),
     ]
     return "\n\n".join(s for s in sections if s).strip() + "\n"
@@ -92,7 +98,7 @@ def _guardrail_section(g: ComplianceGuardrails, conv: ConversationConfig) -> str
 # --------------------------------------------------------------------------- #
 # USER-configured role — lower precedence, "within the rails above".
 # --------------------------------------------------------------------------- #
-def _role_section(conv: ConversationConfig) -> str:
+def _role_section(conv: ConversationConfig, *, opening_turn: bool = False) -> str:
     p = conv.persona
     header = "=== YOUR ROLE (operate strictly within the guardrails above) ==="
     lines: list[str] = [header]
@@ -113,7 +119,11 @@ def _role_section(conv: ConversationConfig) -> str:
     if conv.primary_objective:
         lines.append(f"Your objective on this call: {conv.primary_objective}.")
 
-    if conv.opening:
+    # The opening line is guidance for the FIRST utterance only. Emitting it every
+    # turn is what made the agent repeat its greeting — so only surface it on the
+    # opening turn (the conversation-directives section tells later turns not to
+    # re-open).
+    if conv.opening and opening_turn:
         lines.append(
             "Open the call along these lines (adapt naturally, keep the intent): "
             f"{conv.opening}"
@@ -161,6 +171,33 @@ def _role_section(conv: ConversationConfig) -> str:
             "SDR and keep replies brief."
         )
 
+    return "\n".join(lines)
+
+
+def _conversation_directives(opening_turn: bool) -> str:
+    """Turn-aware conversation rules. Keeps the agent from (a) re-stating the
+    code-emitted AI disclosure, (b) re-greeting every turn, and (c) rambling."""
+    lines = [
+        "=== CONVERSATION ===",
+        "- The required AI disclosure has ALREADY been delivered to the person at the "
+        "start of this call by the system. Do NOT repeat a disclosure or re-introduce "
+        "yourself as an AI unless they directly ask whether you are an AI or a human.",
+        "- Keep every reply short and natural — at most 1–3 sentences. This is a live "
+        "phone conversation, not an essay. Ask one thing at a time.",
+    ]
+    if opening_turn:
+        lines.append(
+            "- The AI-disclosure line has JUST been spoken to open the call. Continue "
+            "directly from it into your opening — introduce yourself and why you're "
+            "calling — WITHOUT adding a second greeting like 'Hi' or 'Hello'. Then "
+            "stop and let them respond."
+        )
+    else:
+        lines.append(
+            "- The call is already in progress. Do NOT greet again, restate your "
+            "opening line, or re-introduce yourself. Just continue naturally from what "
+            "was last said."
+        )
     return "\n".join(lines)
 
 

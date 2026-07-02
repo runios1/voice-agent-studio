@@ -14,16 +14,27 @@ type Tab = "build" | "preview";
 export function App({ api, agentId }: { api: AgentApi; agentId: string }) {
   const init = useAgentStore((s) => s.init);
   const loadAgent = useAgentStore((s) => s.loadAgent);
+  const startBuilder = useAgentStore((s) => s.startBuilder);
+  const startPreview = useAgentStore((s) => s.startPreview);
   const config = useAgentStore((s) => s.config);
   const [tab, setTab] = useState<Tab>("build");
   const [error, setError] = useState<string | null>(null);
 
+  // Load the agent, then let the builder open the conversation (it speaks first).
   useEffect(() => {
     init(api);
-    loadAgent(agentId).catch(() =>
-      setError("Couldn't load this agent. Is the backend running?"),
-    );
-  }, [api, agentId, init, loadAgent]);
+    loadAgent(agentId)
+      .then(() => startBuilder())
+      .catch(() =>
+        setError("Couldn't load this agent. Is the backend running?"),
+      );
+  }, [api, agentId, init, loadAgent, startBuilder]);
+
+  // The first time the user opens Preview, the agent opens the call (outbound SDR
+  // speaks first). startPreview guards itself so this fires once.
+  useEffect(() => {
+    if (tab === "preview" && config) startPreview();
+  }, [tab, config, startPreview]);
 
   return (
     <div className="flex h-full flex-col">

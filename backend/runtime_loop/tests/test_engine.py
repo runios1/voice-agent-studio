@@ -35,6 +35,24 @@ async def test_agent_responds_in_persona():
 
 
 @pytest.mark.anyio
+async def test_agent_opens_the_call_on_empty_first_turn():
+    """An outbound SDR speaks first: an empty first turn is the agent's opening —
+    the code disclosure fires, the model delivers its opening, and NO user turn is
+    recorded."""
+    config = sample_ready_config()
+    wrapper = ScriptedWrapper("My name is Ada, calling about Acme.")
+    engine = RuntimeEngine(wrapper)
+    session = engine.store.create(config.meta.id)
+
+    reply = await _drive(engine, config, session, "")  # empty => agent opens
+
+    assert config.conversation.disclosure.disclosure_script in reply  # disclosure fired
+    assert "Ada" in reply  # model opening delivered
+    assert session.disclosed is True
+    assert all(m.role != "user" for m in session.messages)  # no fake user turn recorded
+
+
+@pytest.mark.anyio
 async def test_disclosure_fires_on_first_turn_when_required():
     config = sample_ready_config()
     engine = RuntimeEngine(ScriptedWrapper("Anyway, how are you?"))

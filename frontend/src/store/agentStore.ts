@@ -47,6 +47,12 @@ export interface AgentState {
   previewStreaming: boolean;
   panelOpen: boolean;
 
+  /** guards so the agent/builder only auto-opens once per surface */
+  builderOpened: boolean;
+  previewOpened: boolean;
+  /** the preview thread id echoed back on each turn (server-issued) */
+  previewSessionId: string | null;
+
   // actions
   init: (api: AgentApi) => void;
   loadAgent: (id: string) => Promise<void>;
@@ -54,6 +60,10 @@ export interface AgentState {
   editField: (path: string, value: unknown) => Promise<void>;
   sendBuilderMessage: (text: string) => Promise<void>;
   sendPreviewMessage: (text: string) => Promise<void>;
+  /** the builder speaks first (greets + asks the first question) */
+  startBuilder: () => Promise<void>;
+  /** the agent opens the call in preview (an outbound SDR speaks first) */
+  startPreview: () => Promise<void>;
   togglePanel: (open?: boolean) => void;
 }
 
@@ -84,7 +94,135 @@ export function seedMaterialized(
   return out;
 }
 
-export const useAgentStore = create<AgentState>((set, get) => ({
+export const useAgentStore = create<AgentState>((set, get) => {
+  // ------------------------------------------------------------------------- //
+  // Builder turn runner. `opening=true` = the builder speaks first (no user
+  // bubble, empty message to the server). Otherwise it's a normal user turn.
+  // ------------------------------------------------------------------------- //
+  const runBuilderTurn = async (text: string, opening: boolean) => {
+    const { api, agentId } = get();
+    if (!api || !agentId || get().builderStreaming) return;
+    if (!opening && !text.trim()) return;
+
+    const assistantId = nextId("a");
+    set((s) => ({
+      builderStreaming: true,
+      messages: [
+        ...s.messages,
+        ...(opening
+          ? []
+          : [{ id: nextId("u"), role: "user" as const, text }]),
+        { id: assistantId, role: "assistant" as const, text: "", streaming: true },
+      ],
+    }));
+
+    const appendToken = (chunk: string) =>
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === assistantId ? { ...m, text: m.text + chunk } : m,
+        ),
+      }));
+
+    try {
+      for await (const ev of api.openBuilderStream(agentId, opening ? "" : text)) {
+        if (ev.event === "token") {
+          appendToken((ev.data as { text: string }).text ?? "");
+        } else if (ev.event === "patch") {
+          const p = ev.data as { path: string; value: unknown };
+          get().applyPatch(p.path, p.value);
+        } else if (ev.event === "notice") {
+          const n = ev.data as { message: string };
+          set((s) => ({
+            messages: [
+              ...s.messages,
+              { id: nextId("notice"), role: "notice", text: n.message },
+            ],
+          }));
+        } else if (ev.event === "done") {
+          break;
+        }
+      }
+    } catch {
+      set((s) => ({
+        messages: [
+          ...s.messages,
+          {
+            id: nextId("notice"),
+            role: "notice",
+            text: "I lost the connection for a second — say that again?",
+          },
+        ],
+      }));
+    } finally {
+      set((s) => ({
+        builderStreaming: false,
+        messages: s.messages.map((m) =>
+          m.id === assistantId ? { ...m, streaming: false } : m,
+        ),
+      }));
+    }
+  };
+
+  // ------------------------------------------------------------------------- //
+  // Preview turn runner. `opening=true` = the agent opens the call (no user
+  // bubble). Threads the server-issued session id so the conversation continues
+  // one session — without it every turn would re-disclose and re-open.
+  // ------------------------------------------------------------------------- //
+  const runPreviewTurn = async (text: string, opening: boolean) => {
+    const { api, agentId } = get();
+    if (!api || !agentId || get().previewStreaming) return;
+    if (!opening && !text.trim()) return;
+
+    const agentMsgId = nextId("pa");
+    set((s) => ({
+      previewStreaming: true,
+      previewMessages: [
+        ...s.previewMessages,
+        ...(opening
+          ? []
+          : [{ id: nextId("pu"), role: "user" as const, text }]),
+        { id: agentMsgId, role: "assistant" as const, text: "", streaming: true },
+      ],
+    }));
+
+    try {
+      for await (const ev of api.openPreviewStream(
+        agentId,
+        opening ? "" : text,
+        get().previewSessionId,
+      )) {
+        if (ev.event === "session") {
+          const sid = (ev.data as { session_id?: string }).session_id;
+          if (sid) set({ previewSessionId: sid });
+        } else if (ev.event === "token") {
+          const chunk = (ev.data as { text: string }).text ?? "";
+          set((s) => ({
+            previewMessages: s.previewMessages.map((m) =>
+              m.id === agentMsgId ? { ...m, text: m.text + chunk } : m,
+            ),
+          }));
+        } else if (ev.event === "done") {
+          break;
+        }
+      }
+    } catch {
+      set((s) => ({
+        previewMessages: [
+          ...s.previewMessages,
+          { id: nextId("notice"), role: "notice", text: "(preview disconnected)" },
+        ],
+      }));
+    } finally {
+      set((s) => ({
+        previewStreaming: false,
+        previewMessages: s.previewMessages.map((m) =>
+          m.id === agentMsgId ? { ...m, streaming: false } : m,
+        ),
+      }));
+    }
+  };
+
+  return {
   api: null,
   agentId: null,
   config: null,
@@ -96,6 +234,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   builderStreaming: false,
   previewStreaming: false,
   panelOpen: false,
+  builderOpened: false,
+  previewOpened: false,
+  previewSessionId: null,
 
   init: (api) => set({ api }),
 
@@ -152,115 +293,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendBuilderMessage: async (text) => {
-    const { api, agentId } = get();
-    if (!api || !agentId || !text.trim() || get().builderStreaming) return;
+  sendBuilderMessage: (text) => runBuilderTurn(text, false),
+  sendPreviewMessage: (text) => runPreviewTurn(text, false),
 
-    const assistantId = nextId("a");
-    set((s) => ({
-      builderStreaming: true,
-      messages: [
-        ...s.messages,
-        { id: nextId("u"), role: "user", text },
-        { id: assistantId, role: "assistant", text: "", streaming: true },
-      ],
-    }));
-
-    const appendToken = (chunk: string) =>
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, text: m.text + chunk } : m,
-        ),
-      }));
-
-    try {
-      for await (const ev of api.openBuilderStream(agentId, text)) {
-        if (ev.event === "token") {
-          appendToken((ev.data as { text: string }).text ?? "");
-        } else if (ev.event === "patch") {
-          const p = ev.data as { path: string; value: unknown };
-          get().applyPatch(p.path, p.value);
-        } else if (ev.event === "notice") {
-          const n = ev.data as { message: string };
-          set((s) => ({
-            messages: [
-              ...s.messages,
-              { id: nextId("notice"), role: "notice", text: n.message },
-            ],
-          }));
-        } else if (ev.event === "done") {
-          break;
-        }
-      }
-    } catch {
-      set((s) => ({
-        messages: [
-          ...s.messages,
-          {
-            id: nextId("notice"),
-            role: "notice",
-            text: "I lost the connection for a second — say that again?",
-          },
-        ],
-      }));
-    } finally {
-      set((s) => ({
-        builderStreaming: false,
-        messages: s.messages.map((m) =>
-          m.id === assistantId ? { ...m, streaming: false } : m,
-        ),
-      }));
-    }
+  startBuilder: async () => {
+    if (get().builderOpened) return;
+    set({ builderOpened: true });
+    await runBuilderTurn("", true);
   },
 
-  sendPreviewMessage: async (text) => {
-    const { api, agentId } = get();
-    if (!api || !agentId || !text.trim() || get().previewStreaming) return;
-
-    const agentMsgId = nextId("pa");
-    set((s) => ({
-      previewStreaming: true,
-      previewMessages: [
-        ...s.previewMessages,
-        { id: nextId("pu"), role: "user", text },
-        { id: agentMsgId, role: "assistant", text: "", streaming: true },
-      ],
-    }));
-
-    try {
-      for await (const ev of api.openPreviewStream(agentId, text)) {
-        if (ev.event === "token") {
-          const chunk = (ev.data as { text: string }).text ?? "";
-          set((s) => ({
-            previewMessages: s.previewMessages.map((m) =>
-              m.id === agentMsgId ? { ...m, text: m.text + chunk } : m,
-            ),
-          }));
-        } else if (ev.event === "done") {
-          break;
-        }
-      }
-    } catch {
-      set((s) => ({
-        previewMessages: [
-          ...s.previewMessages,
-          {
-            id: nextId("notice"),
-            role: "notice",
-            text: "(preview disconnected)",
-          },
-        ],
-      }));
-    } finally {
-      set((s) => ({
-        previewStreaming: false,
-        previewMessages: s.previewMessages.map((m) =>
-          m.id === agentMsgId ? { ...m, streaming: false } : m,
-        ),
-      }));
-    }
+  startPreview: async () => {
+    if (get().previewOpened) return;
+    set({ previewOpened: true });
+    await runPreviewTurn("", true);
   },
 
-  togglePanel: (open) =>
-    set((s) => ({ panelOpen: open ?? !s.panelOpen })),
-}));
+  togglePanel: (open) => set((s) => ({ panelOpen: open ?? !s.panelOpen })),
+  };
+});
