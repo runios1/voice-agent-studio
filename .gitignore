@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# Env & secrets — NEVER commit. Also never let these reach a model context.
+.env
+.env.*
+*.key
+credentials.json
+service-account*.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
