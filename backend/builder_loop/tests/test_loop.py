@@ -66,6 +66,37 @@ def test_conversation_drives_empty_to_ready(fresh_config):
 # --------------------------------------------------------------------------- #
 # 2. Four-way triage routes all four categories correctly.
 # --------------------------------------------------------------------------- #
+def test_tool_only_turn_still_speaks(fresh_config):
+    """Regression: a Gemini tool-call turn carries NO assistant text, so a turn that
+    only records answers would otherwise say nothing. The loop must do a second,
+    tool-free pass and stream a spoken reply (a conversational goal-seeker, not a
+    silent form-filler — D12)."""
+    script = [
+        # turn 1: tool-call ONLY, no text (how Gemini actually replies when calling)
+        resp("", [tc(tools.SET_FIELD, path="conversation.persona.tone", value="warm")]),
+        # the loop's second, tool-free "speak" pass returns the confirmation + next ask
+        resp("Warm tone saved — how should the agent open the call?", []),
+    ]
+    loop, _gate = make_loop(script, fresh_config)
+
+    events = collect(loop, "Make it warm.")
+
+    # the patch still materialized
+    assert ("conversation.persona.tone", "warm") in [(p.path, p.value) for p in patches(events)]
+    # ...AND the user hears a reply, sourced from the second pass
+    assert text_of(events).strip() == "Warm tone saved — how should the agent open the call?"
+
+
+def test_tool_only_turn_falls_back_when_second_pass_is_empty(fresh_config):
+    """If the follow-up pass yields nothing, the user still gets a deterministic line
+    rather than silence (D-reliability)."""
+    script = [resp("", [tc(tools.SET_FIELD, path="conversation.persona.tone", value="warm")])]
+    loop, _gate = make_loop(script, fresh_config)  # no scripted second response
+
+    events = collect(loop, "Make it warm.")
+    assert text_of(events).strip() != ""  # never silent
+
+
 def test_triage_supported_capability_becomes_structured_field(fresh_config):
     loop, gate = make_loop(
         [resp("Done.", [tc(tools.SET_FIELD, path="conversation.persona.tone", value="brisk")])],

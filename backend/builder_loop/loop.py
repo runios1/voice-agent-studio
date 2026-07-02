@@ -28,7 +28,7 @@ from . import tools
 from .events import BuilderEvent, NoticeEvent, PatchEvent, TokenEvent
 from .gate import Gate, GateAccepted, GateError, get_by_path
 from .interviewer import build_system_prompt
-from .session import SessionStore
+from .session import BuilderSession, SessionStore
 
 _TOKEN_RE = re.compile(r"\S+\s*")
 
@@ -61,6 +61,7 @@ class BuilderLoop:
         working: list[Message] = [system, *session.history]
 
         final_text = ""
+        applied: list[GateAccepted] = []
         attempt = 0
         while True:
             response: ModelResponse = await self._model.complete(
@@ -82,6 +83,7 @@ class BuilderLoop:
                 if acc.status_changed and acc.status == AgentStatus.READY:
                     # Synthetic patch so the panel can react to deploy-readiness.
                     yield PatchEvent(path="meta.status", value=AgentStatus.READY.value)
+            applied.extend(accepted)
 
             if rejected and attempt < self._max_retries:
                 # Feed the model its own tool calls + the typed errors, and let it
@@ -101,11 +103,66 @@ class BuilderLoop:
                 yield NoticeEvent(kind=err.kind, message=err.message, path=err.path)
             break
 
+        # A Gemini tool-call turn carries NO assistant text (it's function-call parts
+        # only), so a turn that recorded answers would otherwise say nothing. If the
+        # model didn't already speak, do a second, TOOL-FREE pass so the interviewer
+        # actually talks — confirms what it captured and asks the next question. This
+        # is the second half of the tool-use pattern and what makes the builder a
+        # conversational goal-seeker rather than a silent form-filler (D12).
+        if not final_text.strip():
+            final_text = await self._compose_reply(agent_id, session, applied, rejected)
+
         for chunk in _tokenize(final_text):
             yield TokenEvent(text=chunk)
 
         session.history.append(Message(role="assistant", content=final_text))
         self._sessions.save(session)
+
+    async def _compose_reply(
+        self,
+        agent_id: str,
+        session: BuilderSession,
+        applied: list[GateAccepted],
+        rejected: list[tuple[ToolCall, GateError]],
+    ) -> str:
+        """Generate the spoken reply for a turn whose model response was tool-calls
+        only. Feeds the model a summary of what was saved (with the system prompt
+        recompiled from the NOW-updated config, so it asks the right next question)
+        and calls it WITHOUT tools to force natural language. Falls back to a
+        deterministic line so the user is never met with silence (D-reliability)."""
+        notes: list[str] = []
+        if applied:
+            recorded = "; ".join(f"{a.patch.path} = {a.patch.value!r}" for a in applied)
+            notes.append(f"Saved: {recorded}.")
+        for call, err in rejected:
+            notes.append(f"Could not apply {call.name}: {err.message}")
+        result = " ".join(notes) if notes else "No changes were made this turn."
+
+        system = Message(
+            role="system", content=build_system_prompt(self._gate.get_config(agent_id))
+        )
+        nudge = Message(
+            role="tool",
+            content=(
+                f"{result} Now reply to the user in one or two short, friendly "
+                "sentences: confirm what you just captured and ask about the next "
+                "missing item. Do not call any tools — just talk."
+            ),
+        )
+        try:
+            resp = await self._model.complete(
+                [system, *session.history, nudge], model_tier="frontier"
+            )
+            text = (resp.text or "").strip()
+            if text:
+                return text
+        except Exception:
+            pass  # never surface a stack trace; use the deterministic fallback below
+        if rejected:
+            return rejected[0][1].message
+        if applied:
+            return "Got it — I've noted that. What would you like to set next?"
+        return "Got it. What would you like to work on next?"
 
     # ----------------------------------------------------------------------- #
     # Tool-call routing. Every write goes through the gate (never direct).
