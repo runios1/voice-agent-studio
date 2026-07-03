@@ -93,6 +93,20 @@ class VoicemailBehavior(BaseModel):
     message: Optional[str] = None                            # OPEN, used if leave_message
 
 
+class ClosingBehavior(BaseModel):
+    # What the agent does once a lead is QUALIFIED — the wrap-up flow the Phase 4
+    # compiler (P4-1) turns into "closing directions" in the Live system instruction
+    # (qualified -> confirm missing details -> book -> email -> sign off). ADDITIVE +
+    # optional (P4-5): every field defaults to inert, so an agent that never sets
+    # this section behaves exactly as before. Compiler is responsible for treating an
+    # unset/inconsistent combination gracefully (e.g. book_meeting=True but no
+    # automation.calendar.enabled) — this schema does not cross-validate that.
+    book_meeting: bool = False                              # OPEN — attempt to book via automation.calendar
+    confirm_fields: list[str] = Field(default_factory=list) # OPEN — details to confirm before booking, e.g. ["email", "preferred_time"]
+    confirmation_template_id: Optional[str] = None          # OPEN — should be one of automation.email.template_ids
+    sign_off: Optional[str] = None                          # OPEN, free-text pocket — the closing line once done
+
+
 class ConversationConfig(BaseModel):
     persona: Persona = Field(default_factory=Persona)
     # How the agent opens a call — who it is / why it's calling. Required: an agent
@@ -103,6 +117,7 @@ class ConversationConfig(BaseModel):
     qualification: Qualification = Field(default_factory=Qualification)
     objections: list[Objection] = Field(default_factory=list)
     disclosure: Disclosure = Field(default_factory=Disclosure)
+    closing: ClosingBehavior = Field(default_factory=ClosingBehavior)
     # Extensible catch-all for harmless persona/style detail the builder captures
     # via the four-way triage (see D13). NEVER holds capabilities we don't offer.
     custom_instructions: Optional[str] = None          # OPEN, free-text pocket

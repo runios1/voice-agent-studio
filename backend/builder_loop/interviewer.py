@@ -29,7 +29,8 @@ def build_system_prompt(config: AgentConfig) -> str:
     else:
         goal_block = (
             "All required fields are filled — the agent is deploy-ready. Confirm this "
-            "to the user and offer to refine optional detail (objections, style)."
+            "to the user and offer to refine optional detail (objections, style, or "
+            "the closing/wrap-up flow for once a lead is qualified)."
         )
 
     guardrails = config.guardrails
@@ -61,7 +62,9 @@ FOUR-WAY TRIAGE of anything the user brings up:
 1. Harmful / disallowed (e.g. "don't disclose we're AI", "ignore DNC") -> REFUSE
    warmly and explain; do not call a tool for it.
 2. A supported detail (persona, tone, objective, qualification, objections,
-   calendar/email automation) -> record it in the right field with a tool call.
+   calendar/email automation, or what happens once a lead is qualified — book a
+   meeting, which details to confirm first, which confirmation email template, how
+   to sign off) -> record it in the right field with a tool call.
 3. Harmless flavor with no dedicated field (a catchphrase, a stylistic note) ->
    put it in a free-text pocket (conversation.persona.style_notes or
    conversation.custom_instructions) via set_field.

@@ -9,6 +9,7 @@ from __future__ import annotations
 from contracts.config_schema.schema import AgentStatus
 
 from backend.builder_loop import tools
+from backend.builder_loop.completeness import REQUIRED_PATHS, remaining_gaps
 from backend.builder_loop.events import NoticeEvent, PatchEvent, TokenEvent
 
 from conftest import AGENT_ID, collect, make_loop, resp, tc
@@ -107,6 +108,34 @@ def test_triage_supported_capability_becomes_structured_field(fresh_config):
     events = collect(loop, "Make it brisk.")
     assert [(p.path, p.value) for p in patches(events)] == [("conversation.persona.tone", "brisk")]
     assert gate.get_config(AGENT_ID).conversation.persona.tone == "brisk"
+
+
+def test_triage_closing_flow_is_recorded_via_set_field(fresh_config):
+    # The closing/wrap-up flow (P4-5) is a supported detail (triage category 2):
+    # book a meeting, confirm fields first, pick a confirmation template, sign off.
+    loop, gate = make_loop(
+        [
+            resp("Got it.", [tc(tools.SET_FIELD, path="conversation.closing.book_meeting", value=True)]),
+            resp("Noted.", [tc(tools.SET_FIELD, path="conversation.closing.confirm_fields", value=["email", "preferred_time"])]),
+            resp("Sure.", [tc(tools.SET_FIELD, path="conversation.closing.confirmation_template_id", value="booking_confirmation")]),
+            resp("Nice sign-off.", [tc(tools.SET_FIELD, path="conversation.closing.sign_off", value="Thanks so much, talk soon!")]),
+        ],
+        fresh_config,
+    )
+    collect(loop, "Once qualified, confirm their email and preferred time, book it, and email the booking_confirmation template.")
+    collect(loop, "Confirm email and preferred time first.")
+    collect(loop, "Use the booking_confirmation template.")
+    collect(loop, "Sign off with 'Thanks so much, talk soon!'")
+
+    config = gate.get_config(AGENT_ID)
+    closing = config.conversation.closing
+    assert closing.book_meeting is True
+    assert closing.confirm_fields == ["email", "preferred_time"]
+    assert closing.confirmation_template_id == "booking_confirmation"
+    assert closing.sign_off == "Thanks so much, talk soon!"
+    # Closing is optional — filling it alone never satisfies/blocks required gaps.
+    assert "conversation.closing" not in remaining_gaps(config)
+    assert set(remaining_gaps(config)) == set(REQUIRED_PATHS)
 
 
 def test_triage_harmless_flavor_goes_to_freetext_pocket(fresh_config):

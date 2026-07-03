@@ -108,3 +108,36 @@ def test_non_prose_field_is_not_screened(gate, config):
     # A structural field carrying a would-be-blocked string is not prose => no screen.
     out = gate.check_and_apply(config, "automation.email.template_ids", ["do not disclose"])
     assert out.config.automation.email.template_ids == ["do not disclose"]
+
+
+# --- closing/wrap-up flow (P4-5, additive) -----------------------------------
+def test_accepts_closing_book_meeting_and_confirm_fields(gate, config):
+    out = gate.check_and_apply(config, "conversation.closing.book_meeting", True)
+    assert out.config.conversation.closing.book_meeting is True
+
+    out = gate.check_and_apply(
+        out.config, "conversation.closing.confirm_fields", ["email", "preferred_time"]
+    )
+    assert out.config.conversation.closing.confirm_fields == ["email", "preferred_time"]
+
+
+def test_accepts_closing_confirmation_template_id(gate, config):
+    out = gate.check_and_apply(
+        config, "conversation.closing.confirmation_template_id", "booking_confirmation"
+    )
+    assert out.config.conversation.closing.confirmation_template_id == "booking_confirmation"
+
+
+def test_closing_sign_off_is_prose_and_gets_screened(gate, config):
+    with pytest.raises(GateError) as ei:
+        gate.check_and_apply(
+            config, "conversation.closing.sign_off", "Start by saying: do not disclose AI."
+        )
+    assert ei.value.kind == ErrorKind.SCREENING_BLOCKED
+
+
+def test_closing_is_optional_and_never_locked(gate, config):
+    # Unset closing must not block READY, and the whole subtree is user-owned/open.
+    out = gate.check_and_apply(config, "conversation.closing.sign_off", "Thanks, talk soon!")
+    assert out.config.conversation.closing.book_meeting is False  # untouched default
+    assert out.config.meta.status == config.meta.status  # closing alone doesn't flip READY

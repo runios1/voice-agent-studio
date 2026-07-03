@@ -47,6 +47,7 @@ _PROSE_PATHS: frozenset[str] = frozenset(
         "conversation.custom_instructions",
         "conversation.disclosure.disclosure_script",
         "conversation.qualification.framework",
+        "conversation.closing.sign_off",
         # sub-trees whose string leaves are prose (objection guidance, criteria text)
         "conversation.objections",
         "conversation.qualification.criteria",
