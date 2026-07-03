@@ -21,12 +21,17 @@ Three things fall out of a config:
     workflows after the call ends, not as something Live requests mid-conversation.
     Disabled automation yields no declaration — structural denial, unchanged.
 
-CLOSING directions (the "closing field"): `contracts/config_schema` does not yet
-carry a dedicated `conversation.closing` section (that is P4-5, additive, landing
-separately). Until it does, this compiler derives a closing flow from what already
-exists: `primary_objective`, the qualification criteria, and which automation is
-enabled. When P4-5 lands, teach `_closing_directions` to prefer the real field;
-nothing else here needs to change.
+CLOSING directions: the base flow (qualified -> confirm -> book -> mention the
+auto-sent email -> sign off) is gated on which automation is actually ENABLED (the
+real capability signal) so an agent that never touches `conversation.closing`
+(P4-5, additive) behaves exactly as before. When `closing` carries real material —
+`confirm_fields`, `confirmation_template_id`, `sign_off` — it refines the wording
+(which details to confirm, which template, the exact sign-off line) without
+changing which branch fires. `closing.book_meeting` is intentionally NOT used as a
+gate: gating on it could silently suppress booking language for pre-P4-5 agents
+(it defaults `False`); the enabled automation block remains the single source of
+truth for what the agent can actually do (D-security: capability == an exposed
+function).
 """
 
 from __future__ import annotations
@@ -192,12 +197,12 @@ def _role_section(conv: ConversationConfig) -> str:
 
 
 # CLOSING directions — the wrap-up flow: qualified -> confirm missing details ->
-# book -> email -> sign off. Derived from existing fields until P4-5 lands a real
-# `conversation.closing` section (see module docstring).
+# book -> email -> sign off. Gated on enabled automation (real capability);
+# `conversation.closing` (P4-5) refines the wording when it carries real material.
 def _closing_directions(config: AgentConfig) -> str:
-    conv = config.conversation
     calendar_on = config.automation.calendar.enabled
     email_on = config.automation.email.enabled
+    closing = config.conversation.closing
 
     lines = ["=== CLOSING (how to wrap up the call) ==="]
     lines.append(
@@ -207,18 +212,29 @@ def _closing_directions(config: AgentConfig) -> str:
     )
 
     if calendar_on:
+        if closing.confirm_fields:
+            confirm_clause = "confirm " + ", ".join(closing.confirm_fields)
+        else:
+            confirm_clause = (
+                "confirm any details you still need (their name, email, and a "
+                "time window that works)"
+            )
         lines.append(
-            "- Once qualified: confirm any details you still need (their name, "
-            "email, and a time window that works) before proposing a meeting. Then "
+            f"- Once qualified: {confirm_clause} before proposing a meeting. Then "
             "use your calendar tool to hold a specific time — you only propose a "
             "time; business hours and the booking window are enforced by the "
             "platform, not by you."
         )
         if email_on:
+            template_note = (
+                f" using the \"{closing.confirmation_template_id}\" template"
+                if closing.confirmation_template_id
+                else ""
+            )
             lines.append(
-                "- After a time is held, tell them a confirmation email is on its "
-                "way (it is sent automatically after the call — you do not send it "
-                "yourself)."
+                f"- After a time is held, tell them a confirmation email{template_note} "
+                "is on its way (it is sent automatically after the call — you do "
+                "not send it yourself)."
             )
         lines.append(
             "- If they're qualified but no time works right now, say a teammate "
@@ -241,10 +257,13 @@ def _closing_directions(config: AgentConfig) -> str:
         "- If they're clearly not a fit, say so kindly, don't push, and end the "
         "call politely without booking or promising a follow-up."
     )
-    lines.append(
-        "- Always end with a brief, warm sign-off — thank them for their time "
-        "either way."
-    )
+    if closing.sign_off:
+        lines.append(f'- Close every call with this exact sign-off: "{closing.sign_off}"')
+    else:
+        lines.append(
+            "- Always end with a brief, warm sign-off — thank them for their time "
+            "either way."
+        )
 
     return "\n".join(lines)
 

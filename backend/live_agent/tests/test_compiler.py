@@ -170,3 +170,63 @@ def test_closing_always_includes_polite_exit_for_non_qualified():
     prompt = COMPILER.compile(sample_ready_config()).system_instruction
     assert "not a fit" in prompt
     assert "don't push" in prompt
+
+
+# --------------------------------------------------------------------------- #
+# `conversation.closing` (P4-5, additive) — refines wording without changing
+# which branch fires; an all-default `closing` must leave the prompt unchanged.
+# --------------------------------------------------------------------------- #
+def test_all_default_closing_matches_pre_p4_5_wording():
+    """Regression: landing P4-5 must not change the prompt for any agent that
+    never touches the new field (additive contract)."""
+    config = sample_ready_config()
+    config.automation.calendar.enabled = True
+    prompt = COMPILER.compile(config).system_instruction
+    assert "confirm any details you still need (their name, email, and a time" in prompt
+    assert "Always end with a brief, warm sign-off" in prompt
+
+
+def test_closing_confirm_fields_override_generic_confirmation_wording():
+    config = sample_ready_config()
+    config.automation.calendar.enabled = True
+    config.conversation.closing.confirm_fields = ["email", "preferred_time"]
+    prompt = COMPILER.compile(config).system_instruction
+    assert "confirm email, preferred_time before proposing a meeting" in prompt
+    assert "their name, email, and a time window" not in prompt
+
+
+def test_closing_confirmation_template_id_named_in_email_line():
+    config = sample_ready_config()
+    config.automation.calendar.enabled = True
+    config.automation.email.enabled = True
+    config.automation.email.template_ids = ["confirm_meeting"]
+    config.conversation.closing.confirmation_template_id = "confirm_meeting"
+    prompt = COMPILER.compile(config).system_instruction
+    assert 'using the "confirm_meeting" template' in prompt
+
+
+def test_closing_sign_off_overrides_generic_sign_off():
+    config = sample_ready_config()
+    config.conversation.closing.sign_off = "Thanks so much for your time today!"
+    prompt = COMPILER.compile(config).system_instruction
+    assert 'exact sign-off: "Thanks so much for your time today!"' in prompt
+    assert "brief, warm sign-off — thank them for their time either way" not in prompt
+
+
+def test_book_meeting_flag_never_gates_booking_language():
+    """book_meeting is NOT a gate — automation.calendar.enabled is the single
+    capability signal, so a pre-P4-5 agent with calendar enabled keeps its booking
+    instructions regardless of the new (default-False) flag."""
+    config = sample_ready_config()
+    config.automation.calendar.enabled = True
+    assert config.conversation.closing.book_meeting is False
+    prompt = COMPILER.compile(config).system_instruction
+    assert "hold a specific time" in prompt
+
+    # And the inverse: setting it True with calendar OFF must not fabricate a
+    # booking capability that doesn't exist (graceful, no crash).
+    config2 = sample_ready_config()
+    config2.conversation.closing.book_meeting = True
+    prompt2 = COMPILER.compile(config2).system_instruction
+    assert "hold a specific time" not in prompt2
+    assert "no tool to act on it yourself" in prompt2

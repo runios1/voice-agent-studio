@@ -13,11 +13,13 @@ compiled Live spec out — pure, deterministic, no network, no SDK.
   confirm missing details -> book (if calendar enabled) -> mention the automatic
   confirmation email (if email enabled too) -> sign off; a graceful non-qualified
   exit; a no-tools-enabled fallback that still states a concrete next step in
-  words. `contracts/config_schema` does not yet carry a dedicated
-  `conversation.closing` section (that's P4-5, additive, landing separately) — this
-  derives the flow from `primary_objective` + qualification + which automation is
-  enabled. When P4-5 merges, only `_closing_directions` needs to start preferring
-  the real field; nothing else in this module changes.
+  words. Which branch fires is gated on enabled automation (the real capability
+  signal), so an agent that never touches P4-5's `conversation.closing` behaves
+  exactly as before. When `closing` carries real material — `confirm_fields`,
+  `confirmation_template_id`, `sign_off` — it refines the wording without changing
+  which branch fires. `closing.book_meeting` is deliberately NOT used as a gate
+  (see the module docstring): gating on it would silently suppress booking
+  language for pre-P4-5 agents, since it defaults `False`.
 - **`disclosure_line`** — delegated to `backend.runtime_loop.guardrails.disclosure_line`
   (not reimplemented): one source of truth for the exact code-emitted legal
   utterance, reused the same way `voice_runtime` already does.
@@ -51,6 +53,6 @@ compiled Live spec out — pure, deterministic, no network, no SDK.
 
 ## How to verify
 ```bash
-python3 -m pytest backend/live_agent/tests/ -q   # 17 tests
-python3 -m pytest backend/live_agent/ backend/runtime_loop/ backend/tool_registry/ -q  # 86 tests, nothing collateral broke
+python3 -m pytest backend/live_agent/tests/ -q   # 22 tests
+python3 -m pytest backend/live_agent/ backend/runtime_loop/ backend/tool_registry/ backend/builder_loop/ backend/config_gate/ -q  # 171 tests, nothing collateral broke
 ```
