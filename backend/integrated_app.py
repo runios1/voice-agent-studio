@@ -68,7 +68,9 @@ from backend.integration.supervisor import SupervisedOrchestrator
 from backend.live_agent.compiler import LiveAgentCompilerImpl
 from backend.live_agent.moderation import build_stream_moderator
 from backend.live_agent.preview_transport import create_router as create_live_preview_router
+from backend.live_agent.phone_transport import create_twilio_media_router, twilio_configured
 from backend.live_agent.session import GeminiLiveAgentSession
+from backend.integration.live_dialer import build_live_dialer
 from backend.security import build_screener
 
 log = logging.getLogger("voice_agent_studio.integrated")
@@ -93,9 +95,17 @@ def build_app() -> FastAPI:
     tool_stack = build_tool_stack()
     engine = build_call_engine(model, sink)
     config_source = AgentServiceConfigSource(service)
+    # Phone dialing: when Twilio is configured, campaign calls run the SAME Live-native
+    # agent as the browser preview over a real phone (LiveDialer + Twilio Media Streams).
+    # Without Twilio, fall back to the scripted-mock text dialer so a campaign still runs
+    # end-to-end in dev.
+    if twilio_configured():
+        dialer = build_live_dialer(tool_stack, sink)
+    else:
+        dialer = RealDialer(engine, tool_stack, make_transport_factory(), sink)
     orch = SupervisedOrchestrator(
         config_source=config_source,
-        dialer=RealDialer(engine, tool_stack, make_transport_factory(), sink),
+        dialer=dialer,
         repo=build_orchestrator_repository(),  # Postgres per-lead state when configured
         sink=sink,
     )
@@ -138,6 +148,11 @@ def build_app() -> FastAPI:
         ),
         prefix="/api",
     )
+    # Twilio Media Streams endpoint for real phone calls (the LiveDialer's phone leg).
+    # Mounted at the ROOT (no /api prefix): Twilio's <Stream> dials
+    # wss://{PUBLIC_WSS_BASE}/twilio/media/{token}, which build_phone_transport builds
+    # to match. Harmless (an unrecognized token is closed) when Twilio isn't configured.
+    app.include_router(create_twilio_media_router())
     install_orch_error_handler(app)
     install_events_error_handler(app)
     install_connections_error_handler(app)
