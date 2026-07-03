@@ -37,13 +37,20 @@ from backend.voice_runtime.events import EventSink
 from backend.voice_runtime.transports import MockVoiceTransport, RetellTransport
 
 from backend.tool_registry.catalog import GOOGLE_CALENDAR, GMAIL
-from backend.tool_registry.connections import ConnectionStore
+from backend.tool_registry.connections import ConnectionManager, ConnectionStore
 from backend.tool_registry.credentials import EncryptedCredentialStore, generate_key
+from backend.tool_registry.oauth import (
+    PROVIDER_SPECS,
+    FakeOAuthProvider,
+    GoogleOAuthProvider,
+    OAuthProvider,
+)
 from backend.tool_registry.registry import InMemoryToolRegistry, build_registry
 
 from backend.integration.providers import (
     build_calendar_client,
     build_email_client,
+    calendar_is_real,
     using_mock_clients,
 )
 
@@ -67,6 +74,7 @@ class ToolStack:
     credentials: EncryptedCredentialStore
     calendar_client: object
     email_client: object
+    connection_manager: ConnectionManager
 
     def registry_for(self, config: AgentConfig, sink: EventSink) -> InMemoryToolRegistry:
         """The registry an agent actually exposes: only ENABLED automation blocks yield
@@ -108,6 +116,30 @@ class ToolStack:
             )
 
 
+async def _httpx_post(url: str, data: dict) -> dict:
+    """The real, network-touching `HttpPost` injected into `GoogleOAuthProvider` —
+    `httpx` is imported lazily so this module carries no SDK/network cost until an
+    actual code exchange runs (D8)."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(url, data=data)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _build_oauth_providers() -> dict[str, OAuthProvider]:
+    """One provider per catalog entry (`PROVIDER_SPECS`): the real Google flow when
+    `GOOGLE_OAUTH_CLIENT_ID` is set (both `google_calendar` and `gmail` share Google's
+    endpoints/client), else the no-network `FakeOAuthProvider` (dev/CI)."""
+    if calendar_is_real():
+        return {
+            name: GoogleOAuthProvider(spec, _httpx_post)
+            for name, spec in PROVIDER_SPECS.items()
+        }
+    return {name: FakeOAuthProvider(name) for name in PROVIDER_SPECS}
+
+
 def build_tool_stack() -> ToolStack:
     """Assemble the shared tool stores + provider clients from the environment.
 
@@ -122,11 +154,16 @@ def build_tool_stack() -> ToolStack:
             "TOOL_REGISTRY_ENC_KEY not set — using an ephemeral credential key; stored "
             "tool tokens will NOT survive a restart. Set TOOL_REGISTRY_ENC_KEY in prod."
         )
+    connections = ConnectionStore()
+    credentials = EncryptedCredentialStore(key=enc_key)
     return ToolStack(
-        connections=ConnectionStore(),
-        credentials=EncryptedCredentialStore(key=enc_key),
+        connections=connections,
+        credentials=credentials,
         calendar_client=build_calendar_client(),
         email_client=build_email_client(),
+        connection_manager=ConnectionManager(
+            _build_oauth_providers(), connections, credentials
+        ),
     )
 
 

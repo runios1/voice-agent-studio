@@ -67,6 +67,20 @@ class ToolError(Exception):
             }
         }
 
+    # Advisory HTTP status per kind (mirrors config_gate/orchestrator/events errors) —
+    # used by any router that surfaces a ToolError directly (e.g. connections_router).
+    _STATUS = {
+        ToolErrorKind.GUARDRAIL: 422,
+        ToolErrorKind.NOT_CONNECTED: 404,
+        ToolErrorKind.TENANT_DENIED: 404,  # not-found, never "forbidden" — no leak
+        ToolErrorKind.UNKNOWN_TOOL: 404,
+        ToolErrorKind.PROVIDER_ERROR: 502,
+    }
+
+    @property
+    def http_status(self) -> int:
+        return self._STATUS.get(self.kind, 400)
+
 
 class GuardrailViolation(ToolError):
     """A parameter broke a code-enforced guardrail. The enforcement point (D6)."""
