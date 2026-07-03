@@ -37,9 +37,11 @@ alongside the phone bridge (P4-6). Not silently worked around: simply not attemp
 
 from __future__ import annotations
 
+import array
 import asyncio
 import logging
 import re
+import sys
 import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -96,6 +98,24 @@ log = logging.getLogger("voice_agent_studio.live_agent.session")
 # VAD/ASR handles cleanly (a firehose of micro-frames transcribes unreliably). 3200 bytes
 # = 100 ms of 16 kHz mono s16le.
 _MIC_BATCH_BYTES = 3200
+
+
+def _peak_amplitude(pcm: bytes) -> int:
+    """Loudest |sample| in 16-bit LE mono PCM; 0 == silence. (audioop is gone in 3.13+.)"""
+    n = len(pcm) - (len(pcm) % 2)
+    if n < 2:
+        return 0
+    samples = array.array("h")
+    samples.frombytes(pcm[:n])
+    if sys.byteorder != "little":  # PCM is little-endian; frombytes read it as native
+        samples.byteswap()
+    peak = 0
+    for s in samples:
+        a = -s if s < 0 else s
+        if a > peak:
+            peak = a
+    return peak
+
 
 # Minimum share of the disclosure's words that must appear in the opening turn for it
 # to count as delivered — tolerant of Live phrasing it naturally, strict enough to
@@ -262,16 +282,26 @@ class GeminiLiveAgentSession:
     ) -> None:
         buf = bytearray()
         batches = 0
+        peak = 0  # loudest sample sent this logging interval — reveals a silent mic
         async for chunk in transport.recv_audio():
             if state.ended:
                 return
             buf.extend(chunk)
             if len(buf) >= _MIC_BATCH_BYTES:
-                await conn.send_audio(bytes(buf))
+                out = bytes(buf)
+                await conn.send_audio(out)
                 buf.clear()
                 batches += 1
+                p = _peak_amplitude(out)
+                if p > peak:
+                    peak = p
                 if batches % 20 == 0:  # ~every 2s of streamed audio
-                    log.info("live: mic → Live, ~%d ms streamed", batches * 100)
+                    log.info(
+                        "live: mic → Live, ~%d ms streamed (peak amplitude %d/32767)",
+                        batches * 100,
+                        peak,
+                    )
+                    peak = 0
 
     async def _pump_live(
         self,
