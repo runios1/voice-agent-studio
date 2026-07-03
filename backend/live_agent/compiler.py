@@ -60,12 +60,34 @@ class LiveAgentCompilerImpl:
 def _system_instruction(config: AgentConfig) -> str:
     sections = [
         _guardrail_section(config.guardrails, config.conversation),
+        _opening_section(config),
         _role_section(config.conversation),
         _closing_directions(config),
         _live_conversation_directives(),
         _lock_footer(),
     ]
     return "\n\n".join(s for s in sections if s).strip() + "\n"
+
+
+# LOCKED opening — the disclosure is DIRECTED here (not code-spoken before Live). Live
+# opens the call with it the instant the call connects; if it deviates, the session
+# detects the miss on the opening turn and trips a guardrail-fail event (D-security:
+# provider's chosen posture — prompt-directed + detected, favouring an instant, natural
+# open over a slow code-spoken line).
+def _opening_section(config: AgentConfig) -> str:
+    line = disclosure_line(config)
+    return "\n".join(
+        [
+            "=== OPENING (LOCKED) ===",
+            "The moment the call connects — before any small talk, greeting, or "
+            "anything else — your very first words MUST be this disclosure, spoken in "
+            "full and essentially verbatim:",
+            f'    "{line}"',
+            "Never skip it, never bury it after a 'Hi', never water it down. Only once "
+            "you have said it may you continue straight into a brief opening (who you "
+            "are and why you're calling).",
+        ]
+    )
 
 
 # LOCKED guardrails — highest precedence, emitted first. (Mirrors
@@ -272,10 +294,9 @@ def _live_conversation_directives() -> str:
     return "\n".join(
         [
             "=== CONVERSATION ===",
-            "- The required AI disclosure has ALREADY been delivered to the person, "
-            "in a separate line spoken before you joined the call. Do NOT repeat a "
-            "disclosure or re-introduce yourself as an AI unless they directly ask "
-            "whether you are an AI or a human.",
+            "- You open the call with the LOCKED disclosure above. Once you've said "
+            "it, do NOT repeat it or re-introduce yourself as an AI unless the person "
+            "directly asks whether you are an AI or a human.",
             "- This is a live, spoken phone call. Keep every turn short and natural "
             "— at most 1-3 sentences — and ask one thing at a time. Let them "
             "respond; don't monologue.",

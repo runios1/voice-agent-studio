@@ -48,6 +48,7 @@ class LiveConnection(Protocol):
     async def send_audio(self, pcm: bytes) -> None: ...
     async def send_tool_response(self, responses: list[dict[str, Any]]) -> None: ...
     async def send_steer(self, instruction: str) -> None: ...
+    async def send_kickoff(self, prompt: str) -> None: ...
     def receive(self) -> AsyncIterator[LiveEvent]: ...
 
 
@@ -84,6 +85,15 @@ class GeminiLiveConnection:
         types = self._types
         await self._session.send_client_content(
             turns=types.Content(role="user", parts=[types.Part(text=instruction)]),
+            turn_complete=True,
+        )
+
+    async def send_kickoff(self, prompt: str) -> None:  # pragma: no cover - live smoke
+        """Nudge Live to take the FIRST turn (it otherwise waits for the caller), so the
+        agent opens the call — with its LOCKED disclosure — the instant we connect."""
+        types = self._types
+        await self._session.send_client_content(
+            turns=types.Content(role="user", parts=[types.Part(text=prompt)]),
             turn_complete=True,
         )
 

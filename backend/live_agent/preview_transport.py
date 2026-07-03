@@ -131,14 +131,27 @@ class _SerializedSender:
     def __init__(self, websocket: WebSocket) -> None:
         self._websocket = websocket
         self._lock = asyncio.Lock()
+        self._closed = False  # set once the client is gone; every later send is a no-op
 
     async def send_json(self, data: dict) -> None:
-        async with self._lock:
-            await self._websocket.send_json(data)
+        await self._guarded(lambda: self._websocket.send_json(data))
 
     async def send_bytes(self, data: bytes) -> None:
+        await self._guarded(lambda: self._websocket.send_bytes(data))
+
+    async def _guarded(self, send) -> None:
+        """A hung-up client is a normal end, not an error: once the socket is closed,
+        swallow the disconnect (and every subsequent send) so the session can wind down
+        cleanly instead of a send raising into — and crashing — the run task. (D)"""
+        if self._closed:
+            return
         async with self._lock:
-            await self._websocket.send_bytes(data)
+            if self._closed:
+                return
+            try:
+                await send()
+            except (WebSocketDisconnect, RuntimeError, ConnectionError):
+                self._closed = True
 
 
 def create_router(

@@ -6,12 +6,17 @@
  * test) can render off of. Framework-free and fully dependency-injected
  * (socket/mic/playback), same posture as `voiceSession.ts`.
  *
+ * Barge-in is NOT done here: Gemini Live has native VAD/turn-taking, so the
+ * server tells us (via `cut_playback`, or a moderation `block`) when to stop the
+ * agent's audio — this client never decides that itself. Nothing in this module
+ * inspects the mic for speech; it just streams every frame up continuously and
+ * lets Live interrupt itself.
+ *
  * There is no server-sent "who's talking now" event — Live's turn-taking is
  * internal to the model — so the speaking/listening indicator is inferred
- * client-side: "agent" while agent audio frames are actively arriving (with a
- * short decay so brief inter-word gaps don't flicker), "listening" otherwise or
- * the instant the user's own mic crosses the speech threshold (which also drives
- * barge-in muting, unchanged from Phase 3).
+ * client-side purely from agent audio: "agent" while agent audio frames are
+ * actively arriving (with a short decay so brief inter-word gaps don't flicker),
+ * "listening" otherwise (or when the server cuts playback / a lead transcript lands).
  */
 import type { LiveServerMessage } from "./livePreviewProtocol";
 import { voiceWsPath } from "./livePreviewProtocol";
@@ -20,8 +25,6 @@ import { createPlaybackQueue, type PlaybackQueue } from "./audioPlayback";
 
 const WS_OPEN = 1; // WebSocket.OPEN
 
-const SPEECH_RMS_THRESHOLD = 2000;
-const DUCK_HANGOVER_MS = 600;
 const AGENT_SPEAKING_DECAY_MS = 300;
 
 export type SessionStatus = "idle" | "connecting" | "live" | "ended" | "error";
@@ -55,14 +58,6 @@ export interface LiveVoiceSessionDeps {
   wsUrl?: (agentId: string) => string;
 }
 
-function hasSpeech(frame: ArrayBuffer): boolean {
-  const samples = new Int16Array(frame);
-  if (!samples.length) return false;
-  let sumSquares = 0;
-  for (let i = 0; i < samples.length; i++) sumSquares += samples[i] * samples[i];
-  return Math.sqrt(sumSquares / samples.length) > SPEECH_RMS_THRESHOLD;
-}
-
 function defaultWsUrl(agentId: string): string {
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${window.location.host}${voiceWsPath(agentId)}`;
@@ -73,7 +68,6 @@ export class LiveVoiceSession {
   private mic: MicCapture | null = null;
   private playback: PlaybackQueue | null = null;
   private status: SessionStatus = "idle";
-  private duckUntil = 0;
   private indicator: SpeakingIndicator = "listening";
   private agentAudioGen = 0;
 
@@ -89,13 +83,10 @@ export class LiveVoiceSession {
 
     const createMic = this.deps.createMic ?? startMicCapture;
     try {
+      // Stream every mic frame straight up — no client-side speech detection or
+      // ducking. Live's native VAD decides when the user has interrupted.
       this.mic = await createMic((frame) => {
         if (this.ws && this.ws.readyState === WS_OPEN) this.ws.send(frame);
-        if (hasSpeech(frame)) {
-          this.duckUntil = Date.now() + DUCK_HANGOVER_MS;
-          this.playback?.flush();
-          this.setIndicator("listening");
-        }
       });
     } catch {
       this.setStatus("error");
@@ -174,7 +165,7 @@ export class LiveVoiceSession {
           break;
       }
     } else if (event.data instanceof ArrayBuffer) {
-      if (Date.now() < this.duckUntil) return;
+      // Agent audio always plays; only a server-driven cut_playback/block stops it.
       this.playback?.push(event.data);
       this.markAgentSpeaking();
     }

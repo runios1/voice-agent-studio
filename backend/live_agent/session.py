@@ -2,28 +2,29 @@
 
 Runs ONE conversation per `contracts.live_agent.LiveAgentSession`:
 
-  1. speak the scripted `disclosure_line` in CODE, via the non-conversational
-     `Speaker` (speaker.py) — Live has not even connected yet, so no persona/prompt
-     could ever skip or paraphrase it (D-security §5).
-  2. connect Live with the compiled `LiveAgentSpec` (system instruction, tool
-     declarations, in/out transcription) and pump audio both ways. Live owns
-     VAD/turn-taking; its own `interrupted` signal (barge-in) is honored by cutting
-     whatever the transport is currently playing.
-  3. a Live function-call resolves a `ToolContext` (via the registry's
+  1. connect Live with the compiled `LiveAgentSpec` (system instruction, tool
+     declarations, in/out transcription) and kick it off so IT takes the first turn,
+     opening the call with the disclosure the instant we connect. The disclosure is a
+     LOCKED directive in the system instruction (not code-spoken); the opening turn is
+     then verified — a miss trips a CRITICAL disclosure-missing guardrail event
+     (provider's chosen posture, B: prompt-directed + detected, for an instant natural
+     open). Live owns VAD/turn-taking; its own `interrupted` signal (barge-in) is the
+     only thing that cuts playback — nothing in this code decides barge-in (A).
+  2. a Live function-call resolves a `ToolContext` (via the registry's
      `resolve_context` if it has one, else the correlation ids alone — the registry
      picks the tenant/connection, never the model) and runs the GUARDED handler;
      the result — never anything the model invented — is returned to Live.
-  4. output audio is held for `spec.moderation_buffer_ms` before being handed to the
-     transport; the cumulative output transcription is screened every delta via the
-     `StreamModerator`. BLOCK cancels whatever is still buffered, cuts what's already
-     playing, and steers Live back on guardrail. FLAG is logged but doesn't interrupt
-     — the moderator is a net, never the floor (README).
-  5. the one turn-loop guardrail that predates Live and is NOT delegated to it: a DNC
+  3. output audio is shipped to the transport the instant it lands — NO forced latency
+     (C). The cumulative output transcription is screened via the `StreamModerator` as
+     it arrives; a BLOCK cuts what's already playing and steers Live back on guardrail
+     (some already-sent audio may be heard first — the accepted trade). FLAG is logged
+     but doesn't interrupt — the moderator is a net, never the floor (README).
+  4. the one turn-loop guardrail that predates Live and is NOT delegated to it: a DNC
      opt-out phrase in the caller's own (transcribed) speech ends the call immediately
      with a fixed, code-spoken acknowledgement — exactly like `CallEngine`'s opt-out
      handling, and for the same reason (a locked compliance guardrail must not depend
-     on a persona choosing to honor it).
-  6. events go to the injected `EventSink` (audit-log-shaped: disclosure/tool/
+     on a persona choosing to honor it). This is the ONLY line still code-spoken.
+  5. events go to the injected `EventSink` (audit-log-shaped: disclosure/tool/
      guardrail/booked/outcome — `contracts.events.EventType`) and, separately, to the
      transport's `send_event` (UI-shaped: transcript lines + moderation flags — no
      frozen contract governs this shape, P4-4 owns the wire).
@@ -37,8 +38,9 @@ alongside the phone bridge (P4-6). Not silently worked around: simply not attemp
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from contracts.events.schema import EventType, Severity
@@ -76,6 +78,42 @@ STEER_INSTRUCTION = (
     "conversation back to the call's purpose, within your guardrails.)"
 )
 
+# Sent to Live the instant the call connects so IT takes the first turn — opening with
+# the LOCKED disclosure (directed in the compiled system instruction), instead of
+# waiting for the caller to speak. This makes the agent talk immediately (no slow
+# code-spoken TTS gating the start), the provider's chosen posture (B).
+OPENING_TRIGGER = (
+    "(The call has connected and the person has answered. Begin speaking now: open "
+    "with your required disclosure first, exactly as instructed, then your brief "
+    "opening.)"
+)
+
+# Minimum share of the disclosure's words that must appear in the opening turn for it
+# to count as delivered — tolerant of Live phrasing it naturally, strict enough to
+# catch a skip. Below this, the opening trips a disclosure-missing guardrail event.
+_DISCLOSURE_TOKEN_OVERLAP = 0.7
+
+
+def _normalize(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
+def _disclosure_satisfied(disclosure_line: str, spoken: str) -> bool:
+    """Best-effort check that the agent actually opened with the disclosure (B: it is
+    prompt-directed, so we detect deviation rather than guarantee it structurally).
+    Normalized substring match, or a high overlap of the disclosure's own words in the
+    opening turn — either passes; anything less is treated as a miss."""
+    want = _normalize(disclosure_line)
+    if not want:
+        return True
+    got = _normalize(spoken)
+    if want in got:
+        return True
+    want_tokens = set(want.split())
+    got_tokens = set(got.split())
+    overlap = len(want_tokens & got_tokens) / len(want_tokens)
+    return overlap >= _DISCLOSURE_TOKEN_OVERLAP
+
 
 @dataclass
 class _CallState:
@@ -88,7 +126,7 @@ class _CallState:
     input_text: str = ""  # caller speech accumulated since the last agent turn started
     output_text: str = ""  # agent speech accumulated since the last turn_complete
     turn_has_output: bool = False
-    pending_sends: list[asyncio.Task] = field(default_factory=list)
+    disclosure_checked: bool = False  # the opening turn has been verified for the disclosure
 
 
 class GeminiLiveAgentSession:
@@ -123,11 +161,12 @@ class GeminiLiveAgentSession:
         await transport.start()
         await emitter.emit(EventType.CALL_STARTED, {})
         try:
-            await self._speak(transport, spec.disclosure_line)
-            await transport.send_event({"type": "disclosure", "text": spec.disclosure_line})
-            await emitter.emit(EventType.DISCLOSURE_SPOKEN, {"text": spec.disclosure_line})
-
             async with self._live_connector(spec) as conn:
+                # B: Live opens the call ITSELF — the disclosure is a LOCKED directive in
+                # spec.system_instruction, not a slow code-spoken line. Kick it off so it
+                # speaks the instant we connect; the opening turn is then verified for the
+                # disclosure (deviation trips a guardrail-fail event, see _verify_disclosure).
+                await conn.send_kickoff(OPENING_TRIGGER)
                 await self._drive(conn, spec, transport, registry, moderator, ctx, emitter, state)
         except Exception as exc:  # never let an internal error crash the call visibly
             state.outcome = LiveOutcome.FAILED
@@ -142,12 +181,36 @@ class GeminiLiveAgentSession:
         await emitter.emit(EventType.CALL_ENDED, {"outcome": outcome.value})
         return outcome
 
-    # ------------------------------------------------------------ disclosure --- #
+    # -------------------------------------------------------- code-spoken --- #
     async def _speak(self, transport: AudioTransport, text: str) -> None:
         """Read fixed text aloud via the non-conversational `Speaker`, entirely
-        bypassing Live. Used for the opening disclosure and the DNC opt-out ack."""
+        bypassing Live. Used ONLY for the DNC opt-out ack — a hard stop where Live is
+        cut off and must not negotiate. (The opening disclosure is NO LONGER code-spoken;
+        Live delivers it under a LOCKED directive and the opening turn is verified.)"""
         async for chunk in self._speaker.speak(text):
             await transport.send_audio(chunk)
+
+    # ----------------------------------------------------- disclosure check --- #
+    async def _verify_disclosure(
+        self,
+        spec: LiveAgentSpec,
+        transport: AudioTransport,
+        emitter: LiveEventEmitter,
+        opening_text: str,
+    ) -> None:
+        """B: the disclosure is prompt-directed, so we CHECK the opening turn actually
+        delivered it. Satisfied -> the normal disclosure event/audit record; missing ->
+        a CRITICAL guardrail-fail event (a compliance breach) plus a UI flag."""
+        if _disclosure_satisfied(spec.disclosure_line, opening_text):
+            await transport.send_event({"type": "disclosure", "text": spec.disclosure_line})
+            await emitter.emit(EventType.DISCLOSURE_SPOKEN, {"text": spec.disclosure_line})
+        else:
+            await emitter.emit(
+                EventType.GUARDRAIL_TRIPPED,
+                {"reason": "disclosure_missing", "opening": opening_text},
+                severity=Severity.CRITICAL,
+            )
+            await transport.send_event({"type": "moderation", "verdict": "flag"})
 
     # ------------------------------------------------------------------ drive --- #
     async def _drive(
@@ -184,11 +247,6 @@ class GeminiLiveAgentSession:
             for t in (mic_task, live_task):
                 if not t.done():
                     t.cancel()
-            # Flush whatever audio was still buffered for the moderation delay when
-            # the call ended naturally (a BLOCK/opt-out already cancelled anything it
-            # needed to cancel) — trailing agent audio should still reach the caller.
-            if state.pending_sends:
-                await asyncio.gather(*list(state.pending_sends), return_exceptions=True)
 
     async def _pump_mic(
         self, transport: AudioTransport, conn: LiveConnection, state: _CallState
@@ -209,13 +267,13 @@ class GeminiLiveAgentSession:
         emitter: LiveEventEmitter,
         state: _CallState,
     ) -> None:
-        buffer_s = max(spec.moderation_buffer_ms, 0) / 1000.0
         async for event in conn.receive():
             if event.function_calls:
                 await self._handle_function_calls(
                     event.function_calls, conn, transport, registry, ctx, emitter, state
                 )
 
+            # A: barge-in is Live's call, never ours — we only relay its native signal.
             if event.interrupted:
                 await transport.cut_playback()
 
@@ -236,14 +294,20 @@ class GeminiLiveAgentSession:
                 state.output_text += event.output_transcript_delta
                 await self._check_moderation(conn, transport, moderator, emitter, state)
 
+            # C: no moderation buffer — ship audio the instant it lands. Screening runs
+            # on the transcript in parallel; a BLOCK reacts (cut + steer) when it arrives.
             if event.audio and not state.blocked:
-                await self._schedule_send(transport, event.audio, buffer_s, state)
+                await transport.send_audio(event.audio)
 
             if event.turn_complete:
-                if state.output_text:
+                turn_text = state.output_text
+                if turn_text:
                     await transport.send_event(
-                        {"type": "transcript", "role": "agent", "text": state.output_text}
+                        {"type": "transcript", "role": "agent", "text": turn_text}
                     )
+                if not state.disclosure_checked:
+                    state.disclosure_checked = True
+                    await self._verify_disclosure(spec, transport, emitter, turn_text)
                 state.output_text = ""
                 state.turn_has_output = False
                 state.blocked = False
@@ -256,8 +320,6 @@ class GeminiLiveAgentSession:
         state.outcome = LiveOutcome.OPTED_OUT
         state.ended = True
         state.blocked = True
-        for t in list(state.pending_sends):
-            t.cancel()
         await transport.cut_playback()
         await transport.send_event({"type": "transcript", "role": "lead", "text": state.input_text})
         await self._speak(transport, OPT_OUT_ACK)
@@ -277,8 +339,9 @@ class GeminiLiveAgentSession:
             if state.blocked:
                 return  # already cut for this turn
             state.blocked = True
-            for t in list(state.pending_sends):
-                t.cancel()
+            # C: nothing is buffered to cancel — we cut what's already playing on the
+            # client and steer Live back. Some already-shipped audio may be heard before
+            # the verdict lands; that is the accepted trade for zero forced latency.
             await transport.cut_playback()
             await emitter.emit(
                 EventType.GUARDRAIL_TRIPPED,
@@ -289,24 +352,6 @@ class GeminiLiveAgentSession:
             await conn.send_steer(STEER_INSTRUCTION)
         elif verdict == ModerationVerdict.FLAG:
             await transport.send_event({"type": "moderation", "verdict": verdict.value})
-
-    # -------------------------------------------------------- buffered audio --- #
-    async def _schedule_send(
-        self, transport: AudioTransport, chunk: bytes, delay_s: float, state: _CallState
-    ) -> None:
-        """Hold one audio chunk for the moderation delay budget before forwarding it,
-        so a BLOCK detected from the (slightly ahead) transcript can cancel it before
-        it's ever heard."""
-
-        async def _later() -> None:
-            if delay_s > 0:
-                await asyncio.sleep(delay_s)
-            if not state.blocked:
-                await transport.send_audio(chunk)
-
-        task = asyncio.create_task(_later())
-        state.pending_sends.append(task)
-        task.add_done_callback(lambda t: state.pending_sends.remove(t) if t in state.pending_sends else None)
 
     # --------------------------------------------------------- tool calls --- #
     async def _handle_function_calls(

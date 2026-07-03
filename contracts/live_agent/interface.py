@@ -47,12 +47,15 @@ class LiveAgentSpec:
     consumed by the session (P4-2). Pure data — no live objects — so it is trivially
     testable and cacheable."""
 
-    system_instruction: str            # persona + conversation guardrails + CLOSING directions
-    disclosure_line: str               # spoken in code BEFORE Live drives (never a prompt hope)
+    system_instruction: str            # persona + LOCKED opening disclosure directive + guardrails + CLOSING
+    disclosure_line: str               # the exact disclosure Live is directed to open with; also the
+                                       # yardstick the session checks the opening turn against (deviation
+                                       # trips a guardrail-fail event — detection, not code-spoken)
     tool_declarations: list[dict]      # Live FunctionDeclarations (JSON schema) for ENABLED tools
     voice_name: str = "Kore"           # prebuilt Live voice
     model: Optional[str] = None        # default resolved from env (gemini-3.1-flash-live-preview)
-    moderation_buffer_ms: int = 600    # how long output audio is held for screening
+    moderation_buffer_ms: int = 0      # 0 = no forced audio latency: ship audio as it lands, screen the
+                                       # transcript in parallel, react (cut+steer) when a verdict arrives
 
 
 class LiveAgentCompiler(Protocol):

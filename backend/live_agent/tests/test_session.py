@@ -51,46 +51,54 @@ def _session(connector, moderator=None):
     )
 
 
-async def test_disclosure_is_spoken_before_live_connects():
-    connector = FakeLiveConnector([LiveEvent(turn_complete=True)])
+async def test_live_is_kicked_off_and_opening_disclosure_is_detected():
+    """B: the disclosure is NOT code-spoken. Live is kicked off to take the first turn,
+    opens with the disclosure (directed in the prompt), and the session detects it on
+    the opening transcript — emitting the disclosure event, nothing spoken by code."""
+    connector = FakeLiveConnector(
+        [
+            LiveEvent(
+                output_transcript_delta="This call may use an AI assistant. Hi there —",
+                audio=b"open-audio",
+            ),
+            LiveEvent(turn_complete=True),
+        ]
+    )
     session, moderator = _session(connector)
     speaker = session._speaker  # ScriptedSpeaker double
     transport = FakeAudioTransport()
     registry = FakeToolRegistry({})
 
-    outcome = await session.run(_spec(), transport, registry, moderator, CTX)
+    await session.run(_spec(), transport, registry, moderator, CTX)
 
-    assert speaker.spoken == ["This call may use an AI assistant."]
-    assert connector.entered  # Live wasn't connected until after speak() awaited
-    assert transport.events[0] == {"type": "disclosure", "text": "This call may use an AI assistant."}
-    assert outcome == LiveOutcome.NO_ANSWER  # no lead speech at all in this script
+    assert connector.connection.kickoffs  # Live was nudged to speak first
+    assert speaker.spoken == []  # the opening was NOT code-spoken
+    disclosure_events = [e for e in transport.events if e.get("type") == "disclosure"]
+    assert disclosure_events and disclosure_events[0]["text"] == "This call may use an AI assistant."
+    assert session._sink.of_type(EventType.DISCLOSURE_SPOKEN)
 
 
-async def test_disclosure_event_emitted_before_live_connects_in_order():
-    """The disclosure Speaker call happens strictly before the live_connector call —
-    proven by ordering a side-effecting connector after a synchronous speak()."""
-    order: list[str] = []
-
-    class RecordingConnector(FakeLiveConnector):
-        async def __aenter__(self):
-            order.append("connect")
-            return await super().__aenter__()
-
-    class RecordingSpeaker(ScriptedSpeaker):
-        async def speak(self, text):
-            order.append("speak")
-            async for chunk in super().speak(text):
-                yield chunk
-
-    connector = RecordingConnector([LiveEvent(turn_complete=True)])
-    sink = CollectingEventSink()
-    session = GeminiLiveAgentSession(sink, live_connector=connector, speaker=RecordingSpeaker())
+async def test_missing_opening_disclosure_trips_a_critical_guardrail():
+    """If Live opens WITHOUT the disclosure, that deviation is caught and marked as a
+    guardrail failure (provider's chosen posture: detect, don't structurally guarantee)."""
+    connector = FakeLiveConnector(
+        [
+            LiveEvent(output_transcript_delta="Hey! Wanna hear about a great deal?", audio=b"a"),
+            LiveEvent(turn_complete=True),
+        ]
+    )
+    session, moderator = _session(connector)
     transport = FakeAudioTransport()
     registry = FakeToolRegistry({})
 
-    await session.run(_spec(), transport, registry, ScriptedModerator(), CTX)
+    await session.run(_spec(), transport, registry, moderator, CTX)
 
-    assert order == ["speak", "connect"]
+    misses = [
+        e for e in session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
+        if e.payload.get("reason") == "disclosure_missing"
+    ]
+    assert misses  # deviation recorded as a guardrail fail
+    assert not [e for e in transport.events if e.get("type") == "disclosure"]  # no false-positive
 
 
 async def test_tool_call_round_trips_through_the_guarded_handler():
@@ -138,9 +146,11 @@ async def test_a_rejected_tool_call_trips_a_guardrail_event_and_feeds_the_error_
     [responses] = connector.connection.tool_responses
     assert responses[0]["response"]["ok"] is False
     assert "outside calling hours" in responses[0]["response"]["error"]
-    guardrail_events = session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
-    assert len(guardrail_events) == 1
-    assert guardrail_events[0].payload["tool"] == "calendar"
+    tool_guardrails = [
+        e for e in session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
+        if e.payload.get("tool") == "calendar"
+    ]
+    assert len(tool_guardrails) == 1
 
 
 async def test_moderation_block_cuts_playback_and_never_reaches_the_transport():
@@ -237,7 +247,14 @@ async def test_dnc_opt_out_ends_the_call_with_a_fixed_ack_bypassing_live():
 
 
 async def test_call_lifecycle_events_are_emitted_in_order():
-    connector = FakeLiveConnector([LiveEvent(turn_complete=True)])
+    # Opening turn carries the disclosure, so it's detected (not a miss) — Live opens
+    # the call itself now, so the disclosure event lands after CALL_STARTED.
+    connector = FakeLiveConnector(
+        [
+            LiveEvent(output_transcript_delta="This call may use an AI assistant.", audio=b"a"),
+            LiveEvent(turn_complete=True),
+        ]
+    )
     session, moderator = _session(connector)
     transport = FakeAudioTransport()
     registry = FakeToolRegistry({})

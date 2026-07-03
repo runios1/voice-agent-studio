@@ -183,20 +183,22 @@ describe("LiveVoiceSession", () => {
     expect(callbacks.onIndicator).toHaveBeenCalledWith("agent");
   });
 
-  it("mic speech energy reports 'listening' and mutes the agent (barge-in)", async () => {
-    const { session, socket, sendMicFrame, callbacks, getFlushCount } = setup();
+  it("never barges in client-side: loud mic frames stream up but don't cut the agent", async () => {
+    const { session, socket, sendMicFrame, getFlushCount } = setup();
     await session.start();
     socket.simulateOpen();
 
     // agent talking first
     socket.simulateMessage(new ArrayBuffer(8));
-    callbacks.onIndicator.mockClear();
+    const flushesBefore = getFlushCount();
 
     const loud = new Int16Array(160).fill(20000);
     sendMicFrame(loud.buffer);
 
-    expect(getFlushCount()).toBeGreaterThanOrEqual(1);
-    expect(callbacks.onIndicator).toHaveBeenCalledWith("listening");
+    // the frame is forwarded to the server (Live's VAD decides interruptions)...
+    expect(socket.sent).toContain(loud.buffer);
+    // ...but the client itself never flushes the agent — only the server can.
+    expect(getFlushCount()).toBe(flushesBefore);
   });
 
   it("on 'ended', tears down mic + playback and reports the outcome without an error", async () => {

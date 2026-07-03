@@ -56,6 +56,7 @@ class FakeLiveConnection:
         self.sent_mic_audio: list[bytes] = []
         self.tool_responses: list[list[dict]] = []
         self.steers: list[str] = []
+        self.kickoffs: list[str] = []
 
     async def send_audio(self, pcm: bytes) -> None:
         self.sent_mic_audio.append(pcm)
@@ -65,6 +66,9 @@ class FakeLiveConnection:
 
     async def send_steer(self, instruction: str) -> None:
         self.steers.append(instruction)
+
+    async def send_kickoff(self, prompt: str) -> None:
+        self.kickoffs.append(prompt)
 
     async def receive(self) -> AsyncIterator[LiveEvent]:
         for event in self._events:
