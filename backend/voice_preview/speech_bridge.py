@@ -92,7 +92,9 @@ class GeminiLiveSpeechBridge:
 
     def __init__(self, *, api_key: str, model: Optional[str] = None) -> None:
         self._api_key = api_key
-        self._model = model or os.getenv("GEMINI_MODEL_VOICE_LIVE", "gemini-3.1-flash-live")
+        self._model = model or os.getenv(
+            "GEMINI_MODEL_VOICE_LIVE", "gemini-3.1-flash-live-preview"
+        )
         self._client = None
         self._stt_cm = None
         self._stt_session = None
@@ -103,10 +105,15 @@ class GeminiLiveSpeechBridge:
 
         self._types = types
         self._client = genai.Client(api_key=self._api_key)
+        # The Live models are audio-native and REJECT a TEXT response modality (API
+        # error 1007). For STT we ask for AUDIO + input transcription and simply read
+        # the lead's `input_transcription`, ignoring the model's own audio turn — the
+        # spoken REPLY is still authored by the CallEngine over ModelWrapper (so the
+        # code-emitted disclosure + tools are never bypassed). See DONE.md.
         self._stt_cm = self._client.aio.live.connect(
             model=self._model,
             config=types.LiveConnectConfig(
-                response_modalities=["TEXT"],
+                response_modalities=["AUDIO"],
                 input_audio_transcription=types.AudioTranscriptionConfig(),
             ),
         )
