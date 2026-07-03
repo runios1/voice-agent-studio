@@ -113,8 +113,15 @@ class CampaignPausedPayload(_Payload):
 
 
 class CampaignAutopausedPayload(_Payload):
-    # Emitted by P2-6 when a trip pattern fires. `trigger` names the rule.
-    trigger: str  # REQUIRED — which detection rule tripped.
+    # Emitted when a trip pattern fires (P2-6) or the orchestrator's autopause hook is
+    # called directly. `campaign.autopaused` is NOT in the compliance-critical REQUIRED
+    # set (see module docstring), and producers name the tripped rule differently —
+    # the orchestrator sends `reason`; the P2-6 engine sends `rule` + `reason` — so
+    # none is REQUIRED here; all are recognized (see docs/contract-change-requests/
+    # int-C.md for why the earlier REQUIRED `trigger` rejected every real producer).
+    trigger: Optional[str] = None   # legacy alias some emitters may use
+    rule: Optional[str] = None      # P2-6 engine: the detection rule name
+    reason: Optional[str] = None    # human-readable reason (orchestrator + P2-6)
     count: Optional[int] = None
     window_seconds: Optional[int] = None
 
