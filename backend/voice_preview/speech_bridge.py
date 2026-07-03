@@ -165,6 +165,12 @@ class GeminiLiveSpeechBridge:
             return
 
     async def feed_audio(self, chunk: bytes) -> Optional[str]:  # pragma: no cover
+        # Mic frames start streaming the instant the socket opens, which can beat
+        # start() finishing its network connect (run_call and the inbound loop run
+        # concurrently). Drop frames until the STT session is live — the lead isn't
+        # speaking during the agent's opening anyway.
+        if self._stt_session is None:
+            return None
         types = self._types
         # Send only — never block on a read here (that was the deadlock).
         await self._stt_session.send_realtime_input(
