@@ -143,6 +143,23 @@ class GeminiLiveConnection:
                 return  # receive() returned nothing -> session closed
 
 
+# Gemini Live's FunctionDeclaration parameters are an OpenAPI-3 subset, NOT full JSON
+# Schema: keys like `additionalProperties` are rejected at connect (API 1007 "Unknown
+# name additional_properties"). Strip what it doesn't accept — recursively, since a
+# nested object property can carry it too — when translating a declaration to the wire.
+_LIVE_SCHEMA_UNSUPPORTED = {"additionalProperties"}
+
+
+def _live_schema(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {
+            k: _live_schema(v) for k, v in node.items() if k not in _LIVE_SCHEMA_UNSUPPORTED
+        }
+    if isinstance(node, list):
+        return [_live_schema(v) for v in node]
+    return node
+
+
 class _LiveConnectionCM:
     """Async context manager: opens the Live session (system instruction + tool
     declarations + in/out transcription from the spec), yields the adapter, tears
@@ -166,7 +183,12 @@ class _LiveConnectionCM:
             tools = [
                 types.Tool(
                     function_declarations=[
-                        types.FunctionDeclaration(**d) for d in self._spec.tool_declarations
+                        types.FunctionDeclaration(
+                            name=d["name"],
+                            description=d.get("description"),
+                            parameters=_live_schema(d.get("parameters")),
+                        )
+                        for d in self._spec.tool_declarations
                     ]
                 )
             ]
