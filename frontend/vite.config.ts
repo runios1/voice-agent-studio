@@ -23,6 +23,9 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8000",
         changeOrigin: true,
+        // Forward WebSocket upgrades too, so the live voice preview
+        // (WS /api/agents/{id}/preview/voice) reaches the FastAPI backend.
+        ws: true,
       },
     },
   },
