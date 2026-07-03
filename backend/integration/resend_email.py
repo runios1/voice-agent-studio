@@ -16,10 +16,11 @@ connection token (the frozen contract's shared shape, and its presence already p
 client does not use it to authenticate to Resend; it only asserts it is non-empty,
 mirroring the mock's 401-shape check. Real auth is the injected/`env` `RESEND_API_KEY`.
 
-Recipient gap (see `docs/contract-change-requests/p3-2-email-recipient-address.md`):
-neither `EmailClient.send` nor anything upstream of it (`ToolContext`, `Lead`) carries
-the lead's email address today. Until that CR lands, sends go to a single
-platform-configured stand-in address — see `_recipient()` below.
+Recipient (see `docs/contract-change-requests/p3-2-email-recipient-address.md`, now
+partially applied for the live-preview path): `EmailClient.send` takes an explicit
+`to_address`, resolved by `EmailHandler` from `ToolContext.lead_email`. The platform
+stand-in address (`RESEND_DEV_RECIPIENT`) is now only a last-resort fallback if
+`to_address` is somehow empty — it should not be hit on the normal path.
 
 Approved templates: the model never composes a body or a link (D-security) — it only
 names a `template_id`. Real template *content* is not yet a platform CMS;
@@ -61,6 +62,7 @@ class EmailTemplate:
 class SentEmail:
     provider_message_id: str
     template_id: str
+    to_address: Optional[str] = None
 
 
 # Stand-in platform template store (see module docstring) — real copy only, the model
@@ -122,11 +124,11 @@ class ResendEmailClient:
             raise ProviderError("No such email template.")
         return tpl
 
-    def send(self, access_token: str, template: EmailTemplate) -> SentEmail:
+    def send(self, access_token: str, to_address: str, template: EmailTemplate) -> SentEmail:
         if not access_token:
             raise ProviderError("Missing email connection.")
 
-        to_address = self._recipient()
+        to_address = to_address or self._recipient()
         payload = {
             "from": self._from,
             "to": [to_address],
@@ -156,7 +158,11 @@ class ResendEmailClient:
         if not message_id:
             raise ProviderError("Email provider response was missing a message id.")
 
-        return SentEmail(provider_message_id=message_id, template_id=template.template_id)
+        return SentEmail(
+            provider_message_id=message_id,
+            template_id=template.template_id,
+            to_address=to_address,
+        )
 
     # -- internals ----------------------------------------------------------- #
 

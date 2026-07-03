@@ -19,6 +19,11 @@ references entries by name with no config-schema change (per the frozen contract
 `params` here is the STATIC least-privilege shape; per-agent values that narrow it
 further (e.g. the concrete enum of approved template ids) are injected when the
 registry is built for a given agent — see `registry.build_registry`.
+
+`check_availability` is the one entry with no matching `automation` block of its
+own — it's a read, gated on `automation.calendar.enabled` (same as `calendar`,
+booking) rather than getting its own config toggle, since offering it without the
+ability to book would be pointless.
 """
 
 from __future__ import annotations
@@ -39,7 +44,9 @@ CALENDAR_TOOL = RegistryTool(
     description=(
         "Hold a meeting slot on the lead's behalf on the connected calendar. "
         "Business hours, the booking window, and meeting length are enforced by the "
-        "handler in code — you only propose a start time within the offered window."
+        "handler in code — you only propose a start time within the offered window. "
+        "If you have the lead's email, pass it as attendee_email so the platform "
+        "invites them on the event (this is how they actually receive an invite)."
     ),
     timing=Timing.IN_CALL,  # fast function the voice LLM calls live (D6)
     params={
@@ -49,12 +56,46 @@ CALENDAR_TOOL = RegistryTool(
                 "type": "string",
                 "description": (
                     "Proposed meeting start time, ISO-8601 with timezone offset "
-                    "(e.g. 2026-07-06T15:00:00-04:00)."
+                    "(e.g. 2026-07-06T15:00:00-04:00). Should be one of the slots "
+                    "your availability tool returned."
                 ),
-            }
+            },
+            "attendee_email": {
+                "type": "string",
+                "description": (
+                    "The lead's email address, if they've given it to you this call — "
+                    "used only to invite them on the calendar event."
+                ),
+            },
         },
         "required": ["start_iso"],
-        # Sealed: no way to smuggle calendar_ref, attendee, or length.
+        # Sealed: no way to smuggle calendar_ref or length. attendee_email is the one
+        # least-privilege exception — it's a value the model already collected
+        # verbally per the closing directions, not something it's choosing freely.
+        "additionalProperties": False,
+    },
+    provider=GOOGLE_CALENDAR,
+    required_scopes=CALENDAR_SCOPES,
+)
+
+
+CHECK_AVAILABILITY_TOOL = RegistryTool(
+    name="check_availability",  # no matching automation block — gated on calendar.enabled
+    description=(
+        "Look up real open meeting slots on the connected calendar for a given day, "
+        "so you can offer the lead a time that's actually free instead of guessing. "
+        "Returns up to a handful of candidate start times within calling hours."
+    ),
+    timing=Timing.IN_CALL,
+    params={
+        "type": "object",
+        "properties": {
+            "date_iso": {
+                "type": "string",
+                "description": "The calendar date to check, as YYYY-MM-DD (e.g. 2026-07-06).",
+            }
+        },
+        "required": ["date_iso"],
         "additionalProperties": False,
     },
     provider=GOOGLE_CALENDAR,
@@ -90,4 +131,4 @@ EMAIL_TOOL = RegistryTool(
 
 
 # The whole catalog. Order is the display order; keys are unique by `name`.
-DEFAULT_CATALOG: list[RegistryTool] = [CALENDAR_TOOL, EMAIL_TOOL]
+DEFAULT_CATALOG: list[RegistryTool] = [CALENDAR_TOOL, CHECK_AVAILABILITY_TOOL, EMAIL_TOOL]

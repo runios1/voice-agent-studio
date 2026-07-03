@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Optional, Sequence
 
 from backend.tool_registry.errors import ProviderError
 
@@ -25,18 +26,27 @@ class BookedSlot:
     provider_event_id: str
     start_iso: str
     end_iso: str
+    attendee_email: Optional[str] = None
 
 
 class MockCalendarClient:
     """Stand-in for a Google Calendar client. Records what it 'booked' so tests and
     the audit trail can see it. Requires a non-empty access token — a missing token
-    is a hard failure, mirroring a real 401."""
+    is a hard failure, mirroring a real 401.
+
+    `busy_periods` is empty (always free) unless a test seeds `self.busy` directly —
+    there is no real calendar behind this to have conflicts."""
 
     def __init__(self) -> None:
         self.booked: list[BookedSlot] = []
+        self.busy: list[tuple[datetime, datetime]] = []
 
     def book(
-        self, access_token: str, start: datetime, length_minutes: int
+        self,
+        access_token: str,
+        start: datetime,
+        length_minutes: int,
+        attendee_email: Optional[str] = None,
     ) -> BookedSlot:
         if not access_token:
             raise ProviderError("Missing calendar credential.")
@@ -45,9 +55,17 @@ class MockCalendarClient:
             provider_event_id=f"evt-{len(self.booked) + 1}",
             start_iso=start.isoformat(),
             end_iso=end.isoformat(),
+            attendee_email=attendee_email,
         )
         self.booked.append(slot)
         return slot
+
+    def busy_periods(
+        self, access_token: str, start: datetime, end: datetime
+    ) -> Sequence[tuple[datetime, datetime]]:
+        if not access_token:
+            raise ProviderError("Missing calendar credential.")
+        return [b for b in self.busy if b[1] > start and b[0] < end]
 
 
 @dataclass
@@ -62,6 +80,7 @@ class EmailTemplate:
 class SentEmail:
     provider_message_id: str
     template_id: str
+    to_address: Optional[str] = None
 
 
 class MockEmailClient:
@@ -80,12 +99,15 @@ class MockEmailClient:
             raise ProviderError("No such email template.")
         return tpl
 
-    def send(self, access_token: str, template: EmailTemplate) -> SentEmail:
+    def send(self, access_token: str, to_address: str, template: EmailTemplate) -> SentEmail:
         if not access_token:
             raise ProviderError("Missing email credential.")
+        if not to_address:
+            raise ProviderError("Missing recipient address.")
         msg = SentEmail(
             provider_message_id=f"msg-{len(self.sent) + 1}",
             template_id=template.template_id,
+            to_address=to_address,
         )
         self.sent.append(msg)
         return msg

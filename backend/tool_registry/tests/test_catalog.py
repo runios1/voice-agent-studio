@@ -13,9 +13,11 @@ def test_catalog_has_calendar_and_email():
 
 def test_names_match_automation_block_names():
     # The frozen contract: keys match `config.automation` block names, so no
-    # config-schema change is needed to reference a tool.
+    # config-schema change is needed to reference a tool — except
+    # check_availability, which deliberately has no automation block of its own
+    # and instead rides calendar.enabled (see catalog.py's module docstring).
     for t in DEFAULT_CATALOG:
-        assert t.name in {"calendar", "email"}
+        assert t.name in {"calendar", "email", "check_availability"}
 
 
 def test_timings():
@@ -33,15 +35,24 @@ def test_params_are_least_privilege_and_sealed():
         assert "url" not in props and "body" not in props and "link" not in props
 
 
-def test_calendar_only_exposes_start_time():
+def test_calendar_only_exposes_start_time_and_attendee_email():
     cal = next(t for t in DEFAULT_CATALOG if t.name == "calendar")
-    # The model picks a time and nothing else — not the calendar, attendee, or length.
-    assert set(cal.params["properties"]) == {"start_iso"}
+    # The model picks a time and (optionally) the lead's own email — not the
+    # calendar, length, or anyone else's address.
+    assert set(cal.params["properties"]) == {"start_iso", "attendee_email"}
+    assert cal.params["required"] == ["start_iso"]  # attendee_email stays optional
 
 
 def test_email_only_exposes_template_id():
     email = next(t for t in DEFAULT_CATALOG if t.name == "email")
     assert set(email.params["properties"]) == {"template_id"}
+
+
+def test_check_availability_only_exposes_date():
+    avail = next(t for t in DEFAULT_CATALOG if t.name == "check_availability")
+    assert avail.timing == Timing.IN_CALL
+    assert set(avail.params["properties"]) == {"date_iso"}
+    assert avail.params["required"] == ["date_iso"]
 
 
 def test_providers_and_scopes_present():

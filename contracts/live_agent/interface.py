@@ -56,6 +56,12 @@ class LiveAgentSpec:
     model: Optional[str] = None        # default resolved from env (gemini-3.1-flash-live-preview)
     moderation_buffer_ms: int = 0      # 0 = no forced audio latency: ship audio as it lands, screen the
                                        # transcript in parallel, react (cut+steer) when a verdict arrives
+    # The approved email template to send automatically once a meeting is BOOKED — set by
+    # the compiler from automation.email + conversation.closing (config.automation.email must
+    # still be enabled and connected; this is just WHICH template). None = don't auto-send.
+    # `email` itself stays POST_CALL and is never one of `tool_declarations` (Live never
+    # calls it); the session sends it directly after the call ends, keyed off this field.
+    post_call_email_template_id: Optional[str] = None
 
 
 class LiveAgentCompiler(Protocol):

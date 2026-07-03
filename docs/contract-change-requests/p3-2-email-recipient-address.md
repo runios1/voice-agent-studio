@@ -2,7 +2,8 @@
 - **Workstream:** P3-2 — Resend email client
 - **Contract affected:** `contracts/provider_clients/interface.py` (`EmailClient.send`),
   and upstream of it `contracts/campaign/model.py` (`Lead`)
-- **Status:** proposed
+- **Status:** approved (implemented for the live-preview scheduling feature — items 2
+  and 3 below landed as proposed; item 1, `Lead.email`, is still open, see note below)
 
 ## Problem
 `EmailClient.send(self, access_token: str, template: EmailTemplate) -> SentEmailReceipt`
@@ -63,3 +64,21 @@ keeps the client honest about the gap instead of inventing a hidden side channel
 means the "live smoke: one real send" DONE criterion for P3-2 is satisfiable (mail
 arrives), but not yet "one real send **to the lead**" — that lands when this CR is
 approved and merged.
+
+## Resolution (live-preview scheduling feature)
+Items 2 and 3 landed as proposed: `ToolContext.lead_email` and
+`EmailClient.send(access_token, to_address, template)` (implemented in
+`ResendEmailClient`, `MockEmailClient`, and `EmailHandler.execute`, which now raises
+`GuardrailViolation` when `ctx.lead_email` is absent — exactly as proposed above).
+`RESEND_DEV_RECIPIENT` remains only as a last-resort fallback if `to_address` is
+somehow empty; it should not be hit on the normal path.
+
+**Item 1 (`Lead.email`) is deliberately NOT part of this change** — the live-preview
+call flow has no `Lead` record at all (it's a browser tester, not a campaign lead), so
+`lead_email` is populated a different way: the agent asks for the lead's email as part
+of its closing directions, passes it through the `calendar` tool's optional
+`attendee_email` param (a value it already collected verbally, not a free choice —
+see `backend/tool_registry/catalog.py`), and `backend/live_agent/session.py` attaches
+it to the `ToolContext` for the one post-call `email` invocation it makes. The real
+campaign/dialer path (`backend/integration/dialer.py`) still has no source for
+`lead_email` — `Lead.email` remains open for whoever wires that path to email next.

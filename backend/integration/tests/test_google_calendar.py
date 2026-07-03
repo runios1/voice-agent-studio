@@ -48,8 +48,8 @@ def test_satisfies_the_frozen_contract(monkeypatch):
 def test_book_posts_start_end_and_returns_the_provider_event(monkeypatch):
     calls = []
 
-    def fake_post(url, json, headers, timeout):
-        calls.append((url, json, headers))
+    def fake_post(url, json, headers, timeout, params=None):
+        calls.append((url, json, headers, params))
         return _Resp(
             200,
             {
@@ -68,17 +68,19 @@ def test_book_posts_start_end_and_returns_the_provider_event(monkeypatch):
     assert booking.start_iso == "2026-07-10T10:00:00+00:00"
     assert booking.end_iso == "2026-07-10T10:30:00+00:00"
 
-    [(url, body, headers)] = calls
+    [(url, body, headers, params)] = calls
     assert url == "https://www.googleapis.com/calendar/v3/calendars/primary/events"
     assert headers["Authorization"] == "Bearer tok-abc"
     assert body["start"]["dateTime"] == start.isoformat()
     assert "timeZone" not in body["start"]  # aware datetime — no zone override needed
+    assert "attendees" not in body
+    assert params == {}
 
 
 def test_naive_start_gets_an_explicit_utc_timezone(monkeypatch):
     calls = []
 
-    def fake_post(url, json, headers, timeout):
+    def fake_post(url, json, headers, timeout, params=None):
         calls.append(json)
         return _Resp(200, {"id": "evt_1", "start": {}, "end": {}})
 
@@ -89,6 +91,78 @@ def test_naive_start_gets_an_explicit_utc_timezone(monkeypatch):
     [body] = calls
     assert body["start"]["timeZone"] == "UTC"
     assert body["end"]["timeZone"] == "UTC"
+
+
+def test_attendee_email_adds_attendee_and_requests_send_updates(monkeypatch):
+    calls = []
+
+    def fake_post(url, json, headers, timeout, params=None):
+        calls.append((json, params))
+        return _Resp(200, {"id": "evt_1", "start": {}, "end": {}})
+
+    _patch_post(monkeypatch, fake_post)
+    client = GoogleCalendarClient()
+    client.book(
+        "tok",
+        datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
+        30,
+        attendee_email="lead@example.com",
+    )
+
+    [(body, params)] = calls
+    assert body["attendees"] == [{"email": "lead@example.com"}]
+    assert params == {"sendUpdates": "all"}  # a query param, not a body field
+
+
+def test_busy_periods_parses_the_freebusy_response(monkeypatch):
+    import httpx
+
+    calls = []
+
+    def fake_post(url, json, headers, timeout):
+        calls.append((url, json))
+        return _Resp(
+            200,
+            {
+                "calendars": {
+                    "primary": {
+                        "busy": [
+                            {
+                                "start": "2026-07-10T10:00:00+00:00",
+                                "end": "2026-07-10T10:30:00+00:00",
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = GoogleCalendarClient()
+    start = datetime(2026, 7, 10, 8, tzinfo=timezone.utc)
+    end = datetime(2026, 7, 10, 18, tzinfo=timezone.utc)
+    busy = client.busy_periods("tok", start, end)
+
+    assert busy == [
+        (
+            datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
+            datetime(2026, 7, 10, 10, 30, tzinfo=timezone.utc),
+        )
+    ]
+    [(url, body)] = calls
+    assert url == "https://www.googleapis.com/calendar/v3/freeBusy"
+    assert body["items"] == [{"id": "primary"}]
+    assert body["timeMin"] == start.isoformat()
+
+
+def test_busy_periods_missing_access_token_is_a_provider_error():
+    client = GoogleCalendarClient()
+    with pytest.raises(ProviderError):
+        client.busy_periods(
+            "",
+            datetime(2026, 7, 10, 8, tzinfo=timezone.utc),
+            datetime(2026, 7, 10, 18, tzinfo=timezone.utc),
+        )
 
 
 def test_missing_access_token_is_a_provider_error(monkeypatch):

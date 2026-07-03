@@ -38,14 +38,30 @@ def test_disabled_automation_yields_no_tool(connections, credentials):
 def test_both_enabled_exposes_both(connections, credentials):
     config = make_config(template_ids=["t"])
     reg = build_registry(config, connections, credentials)
-    assert {t.name for t in reg.list_tools()} == {"calendar", "email"}
+    assert {t.name for t in reg.list_tools()} == {"calendar", "check_availability", "email"}
 
 
 def test_list_tools_filters_by_timing(connections, credentials):
     config = make_config(template_ids=["t"])
     reg = build_registry(config, connections, credentials)
-    assert [t.name for t in reg.list_tools(Timing.IN_CALL)] == ["calendar"]
+    assert set(t.name for t in reg.list_tools(Timing.IN_CALL)) == {
+        "calendar",
+        "check_availability",
+    }
     assert [t.name for t in reg.list_tools(Timing.POST_CALL)] == ["email"]
+
+
+def test_check_availability_rides_the_calendar_gate(connections, credentials):
+    # No automation block of its own — disabled/enabled follows calendar exactly.
+    disabled = make_config(calendar_enabled=False, email_enabled=True, template_ids=["t"])
+    reg = build_registry(disabled, connections, credentials)
+    assert reg.get("check_availability") is None
+    with pytest.raises(UnknownTool):
+        reg.handler_for("check_availability")
+
+    enabled = make_config(template_ids=["t"])
+    reg2 = build_registry(enabled, connections, credentials)
+    assert reg2.get("check_availability") is not None
 
 
 def test_email_param_enum_is_narrowed_to_approved_ids(connections, credentials):

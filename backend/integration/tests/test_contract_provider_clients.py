@@ -24,9 +24,12 @@ from backend.tool_registry.integrations import (
 def test_mock_calendar_client_satisfies_contract():
     client = MockCalendarClient()
     assert isinstance(client, CalendarClient)
-    slot = client.book("tok", datetime(2026, 7, 10, 10, tzinfo=timezone.utc), 30)
+    start = datetime(2026, 7, 10, 10, tzinfo=timezone.utc)
+    slot = client.book("tok", start, 30, attendee_email="lead@example.com")
     assert isinstance(slot, CalendarBooking)
     assert slot.provider_event_id and slot.start_iso and slot.end_iso
+    busy = client.busy_periods("tok", start, start)
+    assert busy == []
 
 
 def test_mock_email_client_satisfies_contract():
@@ -35,6 +38,6 @@ def test_mock_email_client_satisfies_contract():
     assert isinstance(client, EmailClient)
     got = client.get_template("intro")
     assert isinstance(got, EmailTemplate)
-    receipt = client.send("tok", got)
+    receipt = client.send("tok", "lead@example.com", got)
     assert isinstance(receipt, SentEmailReceipt)
     assert receipt.provider_message_id and receipt.template_id == "intro"

@@ -77,6 +77,11 @@ class ToolContext(BaseModel, arbitrary_types_allowed=True):
     campaign_id: Optional[str] = None
     lead_id: Optional[str] = None
     connection: Optional[Connection] = None
+    # The recipient EmailHandler sends to (contracts/provider_clients::EmailClient.send's
+    # `to_address`) — never chosen by the model, only ever set by trusted caller code (e.g.
+    # a live-call session attaching an email the lead gave verbally, or, later, a real
+    # `Lead.email`). Absent -> EmailHandler refuses rather than falling back to a stand-in.
+    lead_email: Optional[str] = None
 
 
 class ToolHandler(Protocol):

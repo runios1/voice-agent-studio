@@ -21,16 +21,24 @@ in-adapter refresh-on-401 retry. Google access tokens are short-lived (~1h) but 
 credential store already retains the refresh token — wiring a refresh path is a
 follow-up (would touch `EncryptedCredentialStore`'s read path), not required for this
 workstream's DONE criteria.
+
+`busy_periods` (live-preview scheduling feature) hits `freeBusy.query` — a read, no
+event created — so the agent can compute real open slots before proposing one.
+`book`'s optional `attendee_email` adds the lead as an event attendee with
+`sendUpdates=all`: this is the platform's actual "send a meeting invite" mechanism —
+Google emails the invite itself, there is no separate invite-send call to make.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Sequence
 
 from backend.tool_registry.errors import ProviderError
 
 _EVENTS_URL_TMPL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
+_FREEBUSY_URL = "https://www.googleapis.com/calendar/v3/freeBusy"
 
 
 @dataclass
@@ -50,6 +58,16 @@ def _event_time(dt: datetime) -> dict:
     return {"dateTime": dt.isoformat()}
 
 
+def _rfc3339(dt: datetime) -> str:
+    """`freeBusy.query`'s `timeMin`/`timeMax` are plain RFC3339 strings — unlike
+    `events.insert` there is no sibling `timeZone` field to pair with a naive
+    timestamp, so a naive `dt` is stamped UTC directly (matches `_event_time`'s
+    naive-as-UTC convention elsewhere in this client)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 class GoogleCalendarClient:
     """Real `CalendarClient`: books on the tenant's primary Google Calendar."""
 
@@ -58,7 +76,11 @@ class GoogleCalendarClient:
         self._timeout = timeout
 
     def book(
-        self, access_token: str, start: datetime, length_minutes: int
+        self,
+        access_token: str,
+        start: datetime,
+        length_minutes: int,
+        attendee_email: Optional[str] = None,
     ) -> CalendarBooking:
         if not access_token:
             raise ProviderError("Missing calendar credential.")
@@ -68,11 +90,18 @@ class GoogleCalendarClient:
         end = start + timedelta(minutes=length_minutes)
         body = {"start": _event_time(start), "end": _event_time(end)}
         url = _EVENTS_URL_TMPL.format(calendar_id=self._calendar_id)
+        params = {}
+        if attendee_email:
+            body["attendees"] = [{"email": attendee_email}]
+            # Query param, not a body field — this is what makes Google actually email
+            # the invite to the attendee instead of silently adding them.
+            params["sendUpdates"] = "all"
 
         try:
             resp = httpx.post(
                 url,
                 json=body,
+                params=params,
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=self._timeout,
             )
@@ -94,3 +123,42 @@ class GoogleCalendarClient:
         return CalendarBooking(
             provider_event_id=event_id, start_iso=start_iso, end_iso=end_iso
         )
+
+    def busy_periods(
+        self, access_token: str, start: datetime, end: datetime
+    ) -> Sequence[tuple[datetime, datetime]]:
+        if not access_token:
+            raise ProviderError("Missing calendar credential.")
+
+        import httpx  # lazy: no network/SDK cost at import time (D8)
+
+        body = {
+            "timeMin": _rfc3339(start),
+            "timeMax": _rfc3339(end),
+            "items": [{"id": self._calendar_id}],
+        }
+        try:
+            resp = httpx.post(
+                _FREEBUSY_URL,
+                json=body,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError:
+            raise ProviderError("Calendar provider request failed.")
+
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Calendar provider rejected the freebusy query (status {resp.status_code})."
+            )
+
+        data = resp.json()
+        cal = (data.get("calendars") or {}).get(self._calendar_id) or {}
+        busy = []
+        for period in cal.get("busy", []):
+            b_start = period.get("start")
+            b_end = period.get("end")
+            if not b_start or not b_end:
+                continue
+            busy.append((datetime.fromisoformat(b_start), datetime.fromisoformat(b_end)))
+        return busy

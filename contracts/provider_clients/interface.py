@@ -11,6 +11,12 @@ real client satisfies them by exposing the same attributes/methods — no inheri
 import from the mocks. Do NOT widen these without a contract-change-request: the handler is
 the only caller and it relies on exactly these fields.
 
+Widened for the live-preview scheduling feature (per
+`docs/contract-change-requests/p3-2-email-recipient-address.md`, now applied): `book` gained
+an optional `attendee_email`, `CalendarClient` gained `busy_periods` (a read, so the agent can
+propose a real open slot instead of guessing), and `EmailClient.send` gained a required
+`to_address` — all additive/backward-compatible with the existing mock and real clients.
+
 Security invariants the handler guarantees (a client MUST rely on them, not re-check):
   * `access_token` is the calling TENANT'S OWN decrypted token, resolved by the credential
     store in code. A client never selects a tenant or reads a token store itself.
@@ -24,7 +30,7 @@ Security invariants the handler guarantees (a client MUST rely on them, not re-c
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Optional, Protocol, Sequence, runtime_checkable
 
 
 @runtime_checkable
@@ -42,12 +48,30 @@ class CalendarClient(Protocol):
     """Holds a meeting slot on the tenant's connected calendar."""
 
     def book(
-        self, access_token: str, start: datetime, length_minutes: int
+        self,
+        access_token: str,
+        start: datetime,
+        length_minutes: int,
+        attendee_email: Optional[str] = None,
     ) -> CalendarBooking:
         """Book `length_minutes` from `start` on the tenant's primary calendar and return
         the created event. Raise `ProviderError` on any provider failure (incl. a missing/
         rejected token). `start` may be tz-aware or naive; a real client should treat naive
-        as the tenant's calendar-default zone."""
+        as the tenant's calendar-default zone. `attendee_email`, when given, is invited on
+        the created event — a real client should ask the provider to notify them (this is
+        the platform's actual "send a meeting invite" mechanism; there is no separate
+        invite-sending call). The handler validates its format before this is ever called;
+        a client does not need to re-validate it."""
+        ...
+
+    def busy_periods(
+        self, access_token: str, start: datetime, end: datetime
+    ) -> Sequence[tuple[datetime, datetime]]:
+        """Return the tenant's busy intervals on their primary calendar that overlap
+        [start, end), as (busy_start, busy_end) pairs. Used to compute real open slots
+        before a time is ever proposed to a lead — never to expose the calendar's actual
+        contents (titles/attendees) to the model, only free/busy. Raise `ProviderError` on
+        any provider failure."""
         ...
 
 
@@ -81,7 +105,11 @@ class EmailClient(Protocol):
         upstream, never a place to compose new copy)."""
         ...
 
-    def send(self, access_token: str, template: EmailTemplate) -> SentEmailReceipt:
-        """Send `template` to the lead as the tenant and return the provider receipt. Raise
-        `ProviderError` on any provider failure. MUST NOT alter subject/body/links."""
+    def send(
+        self, access_token: str, to_address: str, template: EmailTemplate
+    ) -> SentEmailReceipt:
+        """Send `template` to `to_address` as the tenant and return the provider receipt.
+        Raise `ProviderError` on any provider failure. MUST NOT alter subject/body/links.
+        `to_address` is resolved by the handler from `ToolContext.lead_email` — a client
+        never picks or guesses a recipient itself."""
         ...

@@ -109,12 +109,116 @@ async def test_slot_in_the_past_is_rejected(
         await reg.execute("calendar", {"start_iso": _at(-1, 15)}, TENANT)
 
 
+async def test_attendee_email_is_validated_and_passed_to_the_client(
+    connections, credentials, sink, calendar_client, manager
+):
+    config = make_config(email_enabled=False)
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    result = await reg.execute(
+        "calendar",
+        {"start_iso": _at(1, 15), "attendee_email": "lead@example.com"},
+        TENANT,
+    )
+    assert result["attendee_email"] == "lead@example.com"
+    assert calendar_client.booked[0].attendee_email == "lead@example.com"
+
+
+async def test_malformed_attendee_email_is_rejected_and_trips(
+    connections, credentials, sink, calendar_client, manager
+):
+    config = make_config(email_enabled=False)
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    with pytest.raises(GuardrailViolation) as ex:
+        await reg.execute(
+            "calendar", {"start_iso": _at(1, 15), "attendee_email": "not-an-email"}, TENANT
+        )
+    assert ex.value.param == "attendee_email"
+    assert calendar_client.booked == []
+
+
+# --------------------------- check_availability ---------------------------
+def _tomorrow_date_iso() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+
+
+async def test_availability_returns_open_slots_within_calling_hours(
+    connections, credentials, sink, calendar_client, manager
+):
+    config = make_config(email_enabled=False, calling_hours=(9, 17))
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    result = await reg.execute(
+        "check_availability", {"date_iso": _tomorrow_date_iso()}, TENANT
+    )
+    assert result["available"] is True
+    assert result["slots"]
+    for iso in result["slots"]:
+        hour = datetime.fromisoformat(iso).hour
+        assert 9 <= hour < 17
+
+
+async def test_availability_excludes_busy_periods(
+    connections, credentials, sink, calendar_client, manager
+):
+    config = make_config(email_enabled=False, calling_hours=(9, 17))
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    day = datetime.now(timezone.utc) + timedelta(days=1)
+    busy_start = day.replace(hour=9, minute=0, second=0, microsecond=0)
+    # Block the whole calling-hours window.
+    calendar_client.busy = [(busy_start, busy_start.replace(hour=17))]
+
+    result = await reg.execute(
+        "check_availability", {"date_iso": _tomorrow_date_iso()}, TENANT
+    )
+    assert result == {"available": False, "slots": []}
+
+
+async def test_availability_invalid_date_is_rejected(
+    connections, credentials, sink, calendar_client, manager
+):
+    config = make_config(email_enabled=False)
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    with pytest.raises(GuardrailViolation) as ex:
+        await reg.execute("check_availability", {"date_iso": "not-a-date"}, TENANT)
+    assert ex.value.param == "date_iso"
+
+
+async def test_availability_slots_for_today_are_never_immediately_stale(
+    connections, credentials, sink, calendar_client, manager
+):
+    # Regression: an earlier version returned a slot starting at exactly `now`, which
+    # had already fallen into the past by the time a real conversation got around to
+    # booking it moments later — check_within_booking_window then rejected it even
+    # though check_availability had just offered it. Every returned slot must still
+    # book cleanly.
+    config = make_config(email_enabled=False, calling_hours=(0, 23))
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    result = await reg.execute("check_availability", {"date_iso": today}, TENANT)
+    assert result["slots"]
+    for slot in result["slots"]:
+        assert datetime.fromisoformat(slot) > datetime.now(timezone.utc)
+
+    booked = await reg.execute("calendar", {"start_iso": result["slots"][0]}, TENANT)
+    assert booked["booked"] is True
+
+
 # --------------------------- email ---------------------------
 async def _email_registry(config, connections, credentials, sink, email_client, manager):
     await _connect(manager, EMAIL_PROVIDER)
     return build_registry(
         config, connections, credentials, sink=sink, email_client=email_client
     )
+
+
+async def _execute_email(reg, args, tenant, *, lead_email="lead@example.com"):
+    """`ToolContext.lead_email` is attached by trusted caller code (see
+    `backend/live_agent/session.py`'s post-call email step) — never a tool arg — so
+    tests build it the same way instead of going through `reg.execute`, which has no
+    lead_email parameter by design (a single deliberate caller, not a generic path)."""
+    ctx = reg.resolve_context("email", tenant)
+    ctx = ctx.model_copy(update={"lead_email": lead_email})
+    return await reg.handler_for("email").execute(args, ctx)
 
 
 async def test_approved_allowlisted_template_sends(
@@ -126,10 +230,22 @@ async def test_approved_allowlisted_template_sends(
         allowed_link_domains=["acme.com"],
     )
     reg = await _email_registry(config, connections, credentials, sink, email_client, manager)
-    result = await reg.execute("email", {"template_id": "confirm"}, TENANT)
+    result = await _execute_email(reg, {"template_id": "confirm"}, TENANT)
     assert result["sent"] is True
     assert len(email_client.sent) == 1
+    assert email_client.sent[0].to_address == "lead@example.com"
     assert sink.of_type(EventType.TOOL_INVOKED)
+
+
+async def test_missing_lead_email_is_rejected(
+    connections, credentials, sink, email_client, manager
+):
+    config = make_config(calendar_enabled=False, template_ids=["confirm"])
+    reg = await _email_registry(config, connections, credentials, sink, email_client, manager)
+    with pytest.raises(GuardrailViolation) as ex:
+        await _execute_email(reg, {"template_id": "confirm"}, TENANT, lead_email=None)
+    assert ex.value.param == "lead_email"
+    assert email_client.sent == []
 
 
 async def test_unapproved_template_is_rejected(
@@ -156,7 +272,7 @@ async def test_template_with_non_allowlisted_link_is_rejected(
     )
     reg = await _email_registry(config, connections, credentials, sink, email_client, manager)
     with pytest.raises(GuardrailViolation) as ex:
-        await reg.execute("email", {"template_id": "bad-link"}, TENANT)
+        await _execute_email(reg, {"template_id": "bad-link"}, TENANT)
     assert ex.value.param == "link"
     assert email_client.sent == []
 
@@ -171,5 +287,5 @@ async def test_subdomain_of_allowlisted_domain_is_allowed(
     )
     config = make_config(calendar_enabled=False, template_ids=["sub"], allowed_link_domains=["acme.com"])
     reg = await _email_registry(config, connections, credentials, sink, client, manager)
-    result = await reg.execute("email", {"template_id": "sub"}, TENANT)
+    result = await _execute_email(reg, {"template_id": "sub"}, TENANT)
     assert result["sent"] is True

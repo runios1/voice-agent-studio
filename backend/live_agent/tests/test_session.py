@@ -382,3 +382,109 @@ async def test_transport_is_started_and_ended_even_when_live_stream_is_empty():
     assert transport.started
     assert transport.ended
     assert connector.exited
+
+
+# --------------------------------------------------------------------------- #
+# post-call confirmation email — `email` is POST_CALL and never declared to Live
+# (see compiler.py); the session is the ONLY caller, firing once after a BOOKED
+# call if a template resolved AND the lead's email was collected mid-call.
+# --------------------------------------------------------------------------- #
+def _booked_calendar_call(attendee_email="lead@example.com"):
+    return function_call(
+        "call-1", "calendar", start_iso="2026-01-02T10:00:00Z", attendee_email=attendee_email
+    )
+
+
+async def test_booked_call_sends_the_post_call_confirmation_email():
+    calendar = FakeHandler(
+        result={
+            "ok": True,
+            "booked": True,
+            "start_iso": "2026-01-02T10:00:00Z",
+            "end_iso": "2026-01-02T10:30:00Z",
+            "attendee_email": "lead@example.com",
+        }
+    )
+    email = FakeHandler(result={"sent": True, "template_id": "confirm_meeting"})
+    registry = FakeToolRegistry({"calendar": calendar, "email": email})
+    connector = FakeLiveConnector([_booked_calendar_call(), LiveEvent(turn_complete=True)])
+    session, moderator = _session(connector)
+    transport = FakeAudioTransport()
+
+    outcome = await session.run(
+        _spec(post_call_email_template_id="confirm_meeting"),
+        transport,
+        registry,
+        moderator,
+        CTX,
+    )
+
+    assert outcome == LiveOutcome.BOOKED
+    assert email.calls  # the handler actually ran
+    args, ctx = email.calls[0]
+    assert args == {"template_id": "confirm_meeting"}
+    assert ctx.lead_email == "lead@example.com"  # attached by the session, not the model
+    tool_events = [e for e in transport.events if e.get("type") == "tool" and e.get("name") == "email"]
+    assert tool_events == [{"type": "tool", "name": "email", "timing": "post_call"}]
+
+
+async def test_no_email_sent_without_a_resolved_template():
+    calendar = FakeHandler(
+        result={"ok": True, "booked": True, "start_iso": "x", "attendee_email": "lead@example.com"}
+    )
+    email = FakeHandler(result={"sent": True})
+    registry = FakeToolRegistry({"calendar": calendar, "email": email})
+    connector = FakeLiveConnector([_booked_calendar_call(), LiveEvent(turn_complete=True)])
+    session, moderator = _session(connector)
+
+    await session.run(_spec(), FakeAudioTransport(), registry, moderator, CTX)  # no template_id set
+
+    assert email.calls == []
+
+
+async def test_no_email_sent_without_a_collected_attendee_address():
+    calendar = FakeHandler(result={"ok": True, "booked": True, "start_iso": "x"})  # no attendee_email
+    email = FakeHandler(result={"sent": True})
+    registry = FakeToolRegistry({"calendar": calendar, "email": email})
+    connector = FakeLiveConnector(
+        [
+            function_call("call-1", "calendar", start_iso="2026-01-02T10:00:00Z"),
+            LiveEvent(turn_complete=True),
+        ]
+    )
+    session, moderator = _session(connector)
+
+    await session.run(
+        _spec(post_call_email_template_id="confirm_meeting"),
+        FakeAudioTransport(),
+        registry,
+        moderator,
+        CTX,
+    )
+
+    assert email.calls == []
+
+
+async def test_a_failed_confirmation_email_trips_a_guardrail_event_but_does_not_crash():
+    calendar = FakeHandler(
+        result={"ok": True, "booked": True, "start_iso": "x", "attendee_email": "lead@example.com"}
+    )
+    email = FakeHandler(error=ValueError("no recipient"))
+    registry = FakeToolRegistry({"calendar": calendar, "email": email})
+    connector = FakeLiveConnector([_booked_calendar_call(), LiveEvent(turn_complete=True)])
+    session, moderator = _session(connector)
+
+    outcome = await session.run(
+        _spec(post_call_email_template_id="confirm_meeting"),
+        FakeAudioTransport(),
+        registry,
+        moderator,
+        CTX,
+    )
+
+    assert outcome == LiveOutcome.BOOKED  # a failed email never downgrades the call outcome
+    tripped = [
+        e for e in session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
+        if e.payload.get("guardrail") == "tool_error"
+    ]
+    assert tripped and "email" in tripped[0].payload["detail"]

@@ -162,6 +162,10 @@ class _CallState:
     turn_has_output: bool = False
     disclosure_checked: bool = False  # the opening turn has been verified for the disclosure
     hangup: bool = False  # the agent called end_call; end after its closing turn finishes
+    # The lead's own email, IF the agent collected it and passed it to the calendar
+    # tool this call (catalog.py's `attendee_email`) — the only source of a real
+    # recipient for the post-call confirmation email (see `_send_confirmation_email`).
+    attendee_email: Optional[str] = None
 
 
 class GeminiLiveAgentSession:
@@ -212,9 +216,57 @@ class GeminiLiveAgentSession:
         outcome = state.outcome or (
             LiveOutcome.QUALIFIED if state.lead_spoke else LiveOutcome.NO_ANSWER
         )
+        if outcome is LiveOutcome.BOOKED:
+            await self._send_confirmation_email(spec, registry, ctx, state, transport, emitter)
         await emitter.emit(EventType.LEAD_OUTCOME, {"outcome": _event_outcome(outcome)})
         await emitter.emit(EventType.CALL_ENDED, {"ended_reason": outcome.value})
         return outcome
+
+    # -------------------------------------------------------- post-call --- #
+    async def _send_confirmation_email(
+        self,
+        spec: LiveAgentSpec,
+        registry: ToolRegistry,
+        ctx: LiveCallContext,
+        state: _CallState,
+        transport: AudioTransport,
+        emitter: LiveEventEmitter,
+    ) -> None:
+        """`email` is POST_CALL and never declared to Live (compiler.py) — this is the
+        one place it actually runs, once, right after a BOOKED call. Both conditions
+        must hold: the compiler resolved an unambiguous confirmation template
+        (`spec.post_call_email_template_id`), AND the agent actually collected the
+        lead's email this call (`state.attendee_email`, set from a `calendar` tool
+        result) — trusted caller code attaches it to the `ToolContext`, never a model-
+        supplied tool arg, so the model can't choose who receives this. Never raises:
+        a failed send must not crash teardown for a call that's already over for the
+        lead — it's reported as a guardrail-tripped event instead, same as an in-call
+        tool failure."""
+        if not spec.post_call_email_template_id or not state.attendee_email:
+            return
+        try:
+            tool_ctx = _resolve_tool_context(registry, "email", ctx)
+            tool_ctx = tool_ctx.model_copy(update={"lead_email": state.attendee_email})
+            handler = registry.handler_for("email")
+            await handler.execute(
+                {"template_id": spec.post_call_email_template_id}, tool_ctx
+            )
+            await transport.send_event(
+                {"type": "tool", "name": "email", "timing": "post_call"}
+            )
+            await emitter.emit(
+                EventType.TOOL_INVOKED,
+                {
+                    "tool_name": "email",
+                    "params": {"template_id": spec.post_call_email_template_id},
+                },
+            )
+        except Exception as exc:
+            await emitter.emit(
+                EventType.GUARDRAIL_TRIPPED,
+                {"guardrail": "tool_error", "detail": f"email: {exc}"},
+                severity=Severity.WARNING,
+            )
 
     # -------------------------------------------------------- code-spoken --- #
     async def _speak(self, transport: AudioTransport, text: str) -> None:
@@ -433,6 +485,8 @@ class GeminiLiveAgentSession:
 
             if isinstance(result, dict) and result.get("booked") is True:
                 state.outcome = LiveOutcome.BOOKED
+                if result.get("attendee_email"):
+                    state.attendee_email = result["attendee_email"]
                 await emitter.emit(
                     EventType.SLOT_BOOKED,
                     {

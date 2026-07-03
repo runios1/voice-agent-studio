@@ -39,7 +39,7 @@ from backend.tool_registry.credentials import EncryptedCredentialStore
 from backend.tool_registry.errors import UnknownTool
 from backend.tool_registry.events import EventSink, NullEventSink
 from backend.tool_registry.guardrails import GuardrailPolicy
-from backend.tool_registry.handlers import CalendarHandler, EmailHandler
+from backend.tool_registry.handlers import AvailabilityHandler, CalendarHandler, EmailHandler
 from backend.tool_registry.integrations import MockCalendarClient, MockEmailClient
 
 
@@ -151,6 +151,13 @@ def build_registry(
         handlers["calendar"] = CalendarHandler(
             policy, credentials, sink, client=calendar_client
         )
+        # check_availability rides the same gate: offering a read with no way to
+        # book would be pointless, and it shares calendar's provider/client.
+        if "check_availability" in catalog:
+            tools["check_availability"] = catalog["check_availability"]
+            handlers["check_availability"] = AvailabilityHandler(
+                policy, credentials, sink, client=calendar_client
+            )
 
     # email — live only if enabled; the param enum is narrowed to approved ids.
     if config.automation.email.enabled and "email" in catalog:

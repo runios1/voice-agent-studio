@@ -20,12 +20,17 @@ literally cannot read anything it isn't handed — least context (D-security).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import urlparse
 
 from contracts.config_schema.schema import AgentConfig
 from backend.tool_registry.errors import GuardrailViolation
+
+# Deliberately loose — this rejects obviously-malformed input, not RFC 5322
+# compliance. Real deliverability is the provider's problem, not a guardrail's.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass(frozen=True)
@@ -127,4 +132,16 @@ def check_template_approved(
             "That email template is not approved for this agent.",
             tool=tool,
             param="template_id",
+        )
+
+
+def check_valid_email(value: str, policy: GuardrailPolicy, *, tool: str) -> None:
+    """Reject a malformed email address. Not a business guardrail (no policy value
+    is consulted) — just rejecting obviously-bad input before it reaches a provider
+    call, same shape as the other checks so handlers have one failure pattern."""
+    if not isinstance(value, str) or not _EMAIL_RE.match(value):
+        raise GuardrailViolation(
+            "That doesn't look like a valid email address.",
+            tool=tool,
+            param="attendee_email",
         )

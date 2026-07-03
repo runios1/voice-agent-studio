@@ -39,7 +39,7 @@ def test_satisfies_the_frozen_contract():
     assert isinstance(client, EmailClient)
     tpl = client.get_template("intro")
     assert isinstance(tpl, EmailTemplate)
-    receipt = client.send("tok", tpl)
+    receipt = client.send("tok", "lead@example.com", tpl)
     assert isinstance(receipt, SentEmailReceipt)
 
 
@@ -52,7 +52,7 @@ def test_send_posts_the_template_unaltered_and_returns_the_provider_id():
 
     client = _client(poster)
     tpl = client.get_template("intro")
-    receipt = client.send("tok", tpl)
+    receipt = client.send("tok", "lead@example.com", tpl)
 
     assert receipt.provider_message_id == "msg_abc"
     assert receipt.template_id == "intro"
@@ -60,15 +60,30 @@ def test_send_posts_the_template_unaltered_and_returns_the_provider_id():
     [(url, body, headers)] = calls
     assert url == "https://api.resend.com/emails"
     assert body["from"] == "agent@example.com"
+    assert body["to"] == ["lead@example.com"]  # the real lead, not the dev stand-in
     assert body["subject"] == tpl.subject
     assert body["text"] == tpl.body  # body/links untouched, per the contract
     assert headers["Authorization"] == "Bearer key_test"
 
 
+def test_empty_to_address_falls_back_to_the_dev_recipient():
+    calls = []
+
+    def poster(url, body, headers):
+        calls.append(body)
+        return _Resp(200, {"id": "msg_abc"})
+
+    client = _client(poster, dev_recipient="fallback@example.com")
+    client.send("tok", "", client.get_template("intro"))
+
+    [body] = calls
+    assert body["to"] == ["fallback@example.com"]
+
+
 def test_missing_access_token_is_a_provider_error():
     client = _client(lambda *a: _Resp(200, {"id": "x"}))
     with pytest.raises(ProviderError):
-        client.send("", client.get_template("intro"))
+        client.send("", "lead@example.com", client.get_template("intro"))
 
 
 def test_unknown_template_is_a_provider_error():
@@ -83,7 +98,7 @@ def test_non_2xx_response_is_mapped_to_provider_error_not_leaked():
 
     client = _client(poster)
     with pytest.raises(ProviderError) as exc:
-        client.send("tok", client.get_template("intro"))
+        client.send("tok", "lead@example.com", client.get_template("intro"))
     # generic, client-safe — the raw provider body never surfaces (least context)
     assert "invalid" not in str(exc.value)
 
@@ -94,7 +109,7 @@ def test_transport_failure_is_mapped_to_provider_error():
 
     client = _client(poster)
     with pytest.raises(ProviderError):
-        client.send("tok", client.get_template("intro"))
+        client.send("tok", "lead@example.com", client.get_template("intro"))
 
 
 def test_missing_api_key_refuses_to_construct():

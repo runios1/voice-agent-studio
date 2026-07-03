@@ -123,14 +123,16 @@ def test_no_automation_enabled_yields_no_automation_tool_declarations():
     assert _automation_tool_names(spec) == []  # only end_call is declared
 
 
-def test_calendar_enabled_yields_calendar_declaration_only():
+def test_calendar_enabled_yields_calendar_and_availability_declarations():
     config = sample_ready_config()
     config.automation.calendar.enabled = True
     spec = COMPILER.compile(config)
-    assert _automation_tool_names(spec) == ["calendar"]
+    assert _automation_tool_names(spec) == ["calendar", "check_availability"]
     (decl,) = [d for d in spec.tool_declarations if d["name"] == "calendar"]
     assert decl["parameters"]["additionalProperties"] is False
-    assert set(decl["parameters"]["properties"]) == {"start_iso"}
+    assert set(decl["parameters"]["properties"]) == {"start_iso", "attendee_email"}
+    (avail,) = [d for d in spec.tool_declarations if d["name"] == "check_availability"]
+    assert set(avail["parameters"]["properties"]) == {"date_iso"}
 
 
 def test_email_enabled_never_yields_an_in_call_declaration():
@@ -143,13 +145,14 @@ def test_email_enabled_never_yields_an_in_call_declaration():
     assert _automation_tool_names(spec) == []  # email not declared; only end_call
 
 
-def test_both_enabled_still_declares_only_calendar():
+def test_both_enabled_still_declares_no_email_tool():
     config = sample_ready_config()
     config.automation.calendar.enabled = True
     config.automation.email.enabled = True
     config.automation.email.template_ids = ["confirm_meeting"]
     spec = COMPILER.compile(config)
-    assert _automation_tool_names(spec) == ["calendar"]
+    assert _automation_tool_names(spec) == ["calendar", "check_availability"]
+    assert "email" not in _automation_tool_names(spec)
 
 
 # --------------------------------------------------------------------------- #
@@ -168,7 +171,8 @@ def test_closing_mentions_confirmation_email_when_email_enabled_too():
     config.automation.email.enabled = True
     config.automation.email.template_ids = ["confirm_meeting"]
     prompt = COMPILER.compile(config).system_instruction
-    assert "confirmation email is on its way" in prompt
+    assert "confirmation email using" in prompt
+    assert "is on its way" in prompt
     assert "you do not send it yourself" in prompt
 
 
@@ -223,6 +227,52 @@ def test_closing_sign_off_overrides_generic_sign_off():
     prompt = COMPILER.compile(config).system_instruction
     assert 'exact sign-off: "Thanks so much for your time today!"' in prompt
     assert "brief, warm sign-off — thank them for their time either way" not in prompt
+
+
+# --------------------------------------------------------------------------- #
+# post_call_email_template_id — what the session actually sends after a booked
+# call, resolved the same way the closing-directions prompt decides what to promise.
+# --------------------------------------------------------------------------- #
+def test_post_call_email_template_id_is_none_when_email_disabled():
+    config = sample_ready_config()
+    spec = COMPILER.compile(config)
+    assert spec.post_call_email_template_id is None
+
+
+def test_post_call_email_template_id_uses_explicit_confirmation_template():
+    config = sample_ready_config()
+    config.automation.email.enabled = True
+    config.automation.email.template_ids = ["confirm_meeting", "other"]
+    config.conversation.closing.confirmation_template_id = "confirm_meeting"
+    spec = COMPILER.compile(config)
+    assert spec.post_call_email_template_id == "confirm_meeting"
+
+
+def test_post_call_email_template_id_falls_back_to_sole_approved_template():
+    config = sample_ready_config()
+    config.automation.email.enabled = True
+    config.automation.email.template_ids = ["only_one"]
+    spec = COMPILER.compile(config)
+    assert spec.post_call_email_template_id == "only_one"
+
+
+def test_post_call_email_template_id_is_none_when_ambiguous():
+    config = sample_ready_config()
+    config.automation.email.enabled = True
+    config.automation.email.template_ids = ["a", "b"]  # no explicit pick -> ambiguous
+    spec = COMPILER.compile(config)
+    assert spec.post_call_email_template_id is None
+    # And the prompt must not promise an email it won't actually send.
+    prompt = COMPILER.compile(config).system_instruction
+    assert "confirmation email" not in prompt
+
+
+def test_closing_mentions_checking_availability_before_proposing_a_time():
+    config = sample_ready_config()
+    config.automation.calendar.enabled = True
+    prompt = COMPILER.compile(config).system_instruction
+    assert "availability tool" in prompt
+    assert "never one you invented" in prompt
 
 
 def test_book_meeting_flag_never_gates_booking_language():

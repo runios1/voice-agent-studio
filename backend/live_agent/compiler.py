@@ -36,6 +36,8 @@ function).
 
 from __future__ import annotations
 
+from typing import Optional
+
 from contracts.config_schema.schema import AgentConfig, ComplianceGuardrails, ConversationConfig
 from contracts.live_agent.interface import LiveAgentSpec
 from backend.runtime_loop.guardrails import disclosure_line
@@ -51,7 +53,24 @@ class LiveAgentCompilerImpl:
             system_instruction=_system_instruction(config),
             disclosure_line=disclosure_line(config),
             tool_declarations=_tool_declarations(config),
+            post_call_email_template_id=_resolved_confirmation_template_id(config),
         )
+
+
+# Which approved email template auto-sends once a meeting is BOOKED, if any. Shared by
+# `compile()` (what the session actually sends — `LiveAgentSpec.post_call_email_template_id`)
+# and `_closing_directions()` (what the prompt promises the lead) so the two can't drift:
+# a promise the runtime can't keep, or a silent send the prompt never mentioned.
+def _resolved_confirmation_template_id(config: AgentConfig) -> Optional[str]:
+    if not config.automation.email.enabled:
+        return None
+    explicit = config.conversation.closing.confirmation_template_id
+    if explicit:
+        return explicit
+    ids = config.automation.email.template_ids
+    if len(ids) == 1:
+        return ids[0]  # unambiguous default; 0 or 2+ ids need an explicit pick
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -223,7 +242,7 @@ def _role_section(conv: ConversationConfig) -> str:
 # `conversation.closing` (P4-5) refines the wording when it carries real material.
 def _closing_directions(config: AgentConfig) -> str:
     calendar_on = config.automation.calendar.enabled
-    email_on = config.automation.email.enabled
+    confirmation_template_id = _resolved_confirmation_template_id(config)
     closing = config.conversation.closing
 
     lines = ["=== CLOSING (how to wrap up the call) ==="]
@@ -234,6 +253,11 @@ def _closing_directions(config: AgentConfig) -> str:
     )
 
     if calendar_on:
+        lines.append(
+            "- You have a connected calendar. Checking availability and booking are "
+            "real actions with real effects, not simulated — never claim to have "
+            "checked or booked anything without actually calling the tool."
+        )
         if closing.confirm_fields:
             confirm_clause = "confirm " + ", ".join(closing.confirm_fields)
         else:
@@ -242,27 +266,28 @@ def _closing_directions(config: AgentConfig) -> str:
                 "time window that works)"
             )
         lines.append(
-            f"- Once qualified: {confirm_clause} before proposing a meeting. Then "
-            "use your calendar tool to hold a specific time — you only propose a "
-            "time; business hours and the booking window are enforced by the "
-            "platform, not by you."
+            f"- Once qualified: {confirm_clause} before proposing a meeting. First "
+            "use your availability tool to see real open times for a day that "
+            "works for them — propose only a time it actually returned, never one "
+            "you invented. Once they agree, use your calendar tool to hold a "
+            "specific time; business hours and the booking window are enforced by "
+            "the platform, not by you."
         )
-        if email_on:
-            template_note = (
-                f" using the \"{closing.confirmation_template_id}\" template"
-                if closing.confirmation_template_id
-                else ""
+        if confirmation_template_id:
+            lines.append(
+                f'- After a time is held, tell them a confirmation email using the '
+                f'"{confirmation_template_id}" template is on its way (it is sent '
+                "automatically after the call — you do not send it yourself)."
             )
             lines.append(
-                f"- After a time is held, tell them a confirmation email{template_note} "
-                "is on its way (it is sent automatically after the call — you do "
-                "not send it yourself)."
+                "- If you have their email, pass it as attendee_email when you book "
+                "so the calendar invite reaches them directly, too."
             )
         lines.append(
             "- If they're qualified but no time works right now, say a teammate "
             "will follow up rather than leaving it vague."
         )
-    elif email_on:
+    elif confirmation_template_id:
         lines.append(
             "- Once qualified, let them know a follow-up email is on its way (it is "
             "sent automatically after the call — you do not send it yourself) and "
@@ -362,9 +387,10 @@ def _tool_declarations(config: AgentConfig) -> list[dict]:
     declarations: list[dict] = []
 
     if config.automation.calendar.enabled:
-        tool = catalog.get("calendar")
-        if tool is not None and tool.timing == Timing.IN_CALL:
-            declarations.append(_to_declaration(tool))
+        for name in ("calendar", "check_availability"):
+            tool = catalog.get(name)
+            if tool is not None and tool.timing == Timing.IN_CALL:
+                declarations.append(_to_declaration(tool))
 
     declarations.append(END_CALL_DECLARATION)
     return declarations
