@@ -1,11 +1,12 @@
 /** Preview chat — a separate surface to talk *to* the built agent (runtime loop,
- * D12). Text (Phase 1) and live voice (P3-5, `../preview/VoicePreview`) are two
- * modes of the same surface — both drive the identical CallEngine turn loop. */
+ * D12). Text (Phase 1) and live voice (P4-6, `../preview/LiveVoicePreview`) are two
+ * modes of the same surface. The voice mode is Live-native (Phase 4): Gemini Live
+ * IS the agent (audio-to-audio), not the old STT+TTS bridge over the text loop. */
 import { useState } from "react";
 import clsx from "clsx";
 import { useAgentStore } from "../store/agentStore";
 import { ChatSurface } from "./ChatSurface";
-import { VoicePreview } from "../preview/VoicePreview";
+import { LiveVoicePreview } from "../preview/LiveVoicePreview";
 
 type Mode = "text" | "voice";
 
@@ -42,7 +43,7 @@ export function PreviewChat() {
             onSend={send}
           />
         ) : agentId ? (
-          <VoicePreview agentId={agentId} />
+          <LiveVoicePreview agentId={agentId} />
         ) : null}
       </div>
     </div>

@@ -65,7 +65,11 @@ from backend.integration.persistence import (
     build_orchestrator_repository,
 )
 from backend.integration.supervisor import SupervisedOrchestrator
-from backend.voice_preview.router import create_router as create_preview_router
+from backend.live_agent.compiler import LiveAgentCompilerImpl
+from backend.live_agent.moderation import build_stream_moderator
+from backend.live_agent.preview_transport import create_router as create_live_preview_router
+from backend.live_agent.session import GeminiLiveAgentSession
+from backend.security import build_screener
 
 log = logging.getLogger("voice_agent_studio.integrated")
 
@@ -115,10 +119,23 @@ def build_app() -> FastAPI:
         ),
         prefix="/api",
     )
-    # P3-4 — live talking preview: browser mic <-> Gemini Live over the SAME CallEngine
-    # + per-agent tool registry a real call uses. WS /api/agents/{id}/preview/voice.
+    # P4-6 — live talking preview, Live-native (Phase 4 pivot): Gemini Live IS the
+    # agent (audio-to-audio), driven by the compiled LiveAgentSpec + the per-agent
+    # tool registry a real call uses, with output-transcription moderation as a net.
+    # Replaces the P3-4 STT+TTS bridge on the SAME WS route
+    # /api/agents/{id}/preview/voice. The compiler and screener are shared
+    # singletons; a fresh Live session + moderator are minted per connection (both
+    # carry per-call state), mirroring the CallEngine posture.
+    screener = build_screener()
     app.include_router(
-        create_preview_router(config_source, tool_stack, model, sink),
+        create_live_preview_router(
+            config_source,
+            tool_stack,
+            LiveAgentCompilerImpl(),
+            sink,
+            session_factory=lambda: GeminiLiveAgentSession(sink),
+            moderator_factory=lambda: build_stream_moderator(screener),
+        ),
         prefix="/api",
     )
     install_orch_error_handler(app)
