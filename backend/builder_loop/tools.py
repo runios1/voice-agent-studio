@@ -30,9 +30,15 @@ BUILDER_TOOLS: list[ToolDef] = [
         description=(
             "Record a single answer by setting one config field. Use for scalar/leaf "
             "values (role, tone, opening, primary_objective, voicemail.action, "
-            "persona.style_notes, custom_instructions, etc.). `path` is a dotted path "
-            "into the agent config; `value` is the new value. Do NOT use for locked "
-            "platform guardrails — they will be rejected."
+            "persona.style_notes, custom_instructions, etc.) and for the closing/"
+            "wrap-up flow once a lead is qualified: conversation.closing.book_meeting "
+            "(bool), conversation.closing.confirm_fields (list of field names to "
+            "confirm before booking, e.g. ['email', 'preferred_time'] — replaces the "
+            "whole list), conversation.closing.confirmation_template_id (an approved "
+            "template id from automation.email.template_ids), conversation.closing."
+            "sign_off (free-text closing line). `path` is a dotted path into the "
+            "agent config; `value` is the new value. Do NOT use for locked platform "
+            "guardrails — they will be rejected."
         ),
         parameters={
             "type": "object",
@@ -42,7 +48,7 @@ BUILDER_TOOLS: list[ToolDef] = [
                     "description": "Dotted config path, e.g. 'conversation.persona.tone'.",
                 },
                 "value": {
-                    "description": "The value to set (string/number/boolean).",
+                    "description": "The value to set (string/number/boolean/list of strings).",
                 },
             },
             "required": ["path", "value"],

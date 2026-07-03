@@ -53,3 +53,15 @@ def test_status_flips_ready_when_all_filled(fresh_config):
 def test_whitespace_only_string_is_still_a_gap(fresh_config):
     fresh_config.conversation.persona.role = "   "
     assert "conversation.persona.role" in remaining_gaps(fresh_config)
+
+
+def test_closing_flow_is_additive_and_optional(fresh_config):
+    # P4-5: conversation.closing is real material for the Live compiler, but it is
+    # NOT part of the completeness model — an agent can go READY without ever
+    # touching it, and setting it never counts toward or against required gaps.
+    assert "conversation.closing" not in REQUIRED_PATHS
+    gaps_before = set(remaining_gaps(fresh_config))
+    fresh_config.conversation.closing.book_meeting = True
+    fresh_config.conversation.closing.confirm_fields = ["email"]
+    fresh_config.conversation.closing.sign_off = "Talk soon!"
+    assert set(remaining_gaps(fresh_config)) == gaps_before
