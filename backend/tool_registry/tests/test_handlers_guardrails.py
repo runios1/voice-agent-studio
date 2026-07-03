@@ -56,6 +56,26 @@ async def test_valid_slot_books_and_emits(
     assert EventType.GUARDRAIL_TRIPPED not in types
 
 
+async def test_handler_event_payloads_match_the_events_contract(
+    connections, credentials, sink, calendar_client, manager
+):
+    """The handler's emitted payloads must satisfy backend.events.payloads or the live
+    EventService rejects them. Regression guard: the InMemoryEventSink here does not
+    validate, which once let TOOL_INVOKED/SLOT_BOOKED/GUARDRAIL_TRIPPED ship with the
+    wrong field names."""
+    from backend.events.payloads import validate_payload
+
+    config = make_config(email_enabled=False)
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    await reg.execute("calendar", {"start_iso": _at(1, 15)}, TENANT)  # TOOL_INVOKED + SLOT_BOOKED
+    with pytest.raises(GuardrailViolation):
+        await reg.execute("calendar", {"start_iso": _at(1, 22)}, TENANT)  # GUARDRAIL_TRIPPED
+
+    assert sink.events
+    for e in sink.events:
+        validate_payload(e.type, e.payload)  # raises if any payload is contract-wrong
+
+
 async def test_out_of_hours_slot_is_rejected_and_trips(
     connections, credentials, sink, calendar_client, manager
 ):

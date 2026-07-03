@@ -14,6 +14,7 @@ from contracts.live_agent.interface import (
     ModerationVerdict,
 )
 
+from backend.events.payloads import validate_payload
 from backend.live_agent.events import CollectingEventSink
 from backend.live_agent.live_connection import LiveEvent
 from backend.live_agent.session import GeminiLiveAgentSession, OPT_OUT_ACK
@@ -28,6 +29,58 @@ from backend.live_agent.tests.fakes import (
 )
 
 CTX = LiveCallContext(tenant_id="t1", agent_id="a1", campaign_id="c1", lead_id="l1")
+
+
+class _ValidatingSink(CollectingEventSink):
+    """A sink that runs each payload through the REAL events contract validator — the
+    check the mock CollectingEventSink skips and the live EventService applies. Catches
+    the payload-shape drift that a non-validating sink silently accepted."""
+
+    async def emit(self, event) -> None:
+        validate_payload(event.type, event.payload)  # raises on a contract-wrong payload
+        await super().emit(event)
+
+
+async def test_every_emitted_event_payload_matches_the_events_contract():
+    handler = FakeHandler(
+        result={
+            "ok": True,
+            "booked": True,
+            "start_iso": "2026-01-02T10:00:00Z",
+            "end_iso": "2026-01-02T10:30:00Z",
+        }
+    )
+    registry = FakeToolRegistry({"calendar": handler})
+    moderator = ScriptedModerator({"forbidden": ModerationVerdict.BLOCK})
+    connector = FakeLiveConnector(
+        [
+            LiveEvent(output_transcript_delta="This call may use an AI assistant. Hi.", audio=b"a"),
+            LiveEvent(turn_complete=True),  # -> DISCLOSURE_SPOKEN
+            LiveEvent(output_transcript_delta="forbidden claim", audio=b"b"),  # -> GUARDRAIL_TRIPPED
+            LiveEvent(turn_complete=True),
+            function_call("c1", "calendar", start_iso="2026-01-02T10:00:00Z"),  # -> TOOL_INVOKED + SLOT_BOOKED
+            function_call("e1", "end_call", outcome="qualified"),  # -> TOOL_INVOKED(end_call)
+            LiveEvent(turn_complete=True),  # -> hangup -> LEAD_OUTCOME + CALL_ENDED
+        ]
+    )
+    sink = _ValidatingSink()
+    session = GeminiLiveAgentSession(
+        sink, live_connector=connector, speaker=ScriptedSpeaker(chunk_size=1024)
+    )
+
+    # Must not raise: every emitted payload validates against backend.events.payloads.
+    await session.run(_spec(), FakeAudioTransport(), registry, moderator, CTX)
+
+    seen = {e.type for e in sink.events}
+    assert {
+        EventType.CALL_STARTED,
+        EventType.DISCLOSURE_SPOKEN,
+        EventType.GUARDRAIL_TRIPPED,
+        EventType.TOOL_INVOKED,
+        EventType.SLOT_BOOKED,
+        EventType.LEAD_OUTCOME,
+        EventType.CALL_ENDED,
+    } <= seen
 
 
 def _spec(**overrides) -> LiveAgentSpec:
@@ -95,7 +148,7 @@ async def test_missing_opening_disclosure_trips_a_critical_guardrail():
 
     misses = [
         e for e in session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
-        if e.payload.get("reason") == "disclosure_missing"
+        if e.payload.get("guardrail") == "disclosure_missing"
     ]
     assert misses  # deviation recorded as a guardrail fail
     assert not [e for e in transport.events if e.get("type") == "disclosure"]  # no false-positive
@@ -148,9 +201,10 @@ async def test_a_rejected_tool_call_trips_a_guardrail_event_and_feeds_the_error_
     assert "outside calling hours" in responses[0]["response"]["error"]
     tool_guardrails = [
         e for e in session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
-        if e.payload.get("tool") == "calendar"
+        if e.payload.get("guardrail") == "tool_error"
     ]
     assert len(tool_guardrails) == 1
+    assert "calendar" in tool_guardrails[0].payload["detail"]
 
 
 async def test_moderation_block_cuts_playback_and_never_reaches_the_transport():
@@ -174,7 +228,7 @@ async def test_moderation_block_cuts_playback_and_never_reaches_the_transport():
     mod_events = [e for e in transport.events if e.get("type") == "moderation"]
     assert mod_events and mod_events[0]["verdict"] == "block"
     guardrail_events = session._sink.of_type(EventType.GUARDRAIL_TRIPPED)
-    assert any(e.payload.get("reason") == "moderation_block" for e in guardrail_events)
+    assert any(e.payload.get("guardrail") == "moderation_block" for e in guardrail_events)
 
 
 async def test_moderation_flag_does_not_cut_playback():
@@ -285,7 +339,8 @@ async def test_dnc_opt_out_ends_the_call_with_a_fixed_ack_bypassing_live():
     assert speaker.spoken[-1] == OPT_OUT_ACK
     assert b"should-not-send" not in transport.sent_audio
     lead_outcome_events = session._sink.of_type(EventType.LEAD_OUTCOME)
-    assert lead_outcome_events[-1].payload["outcome"] == "opted_out"
+    # LiveOutcome.OPTED_OUT maps to the events-contract vocabulary "do_not_call".
+    assert lead_outcome_events[-1].payload["outcome"] == "do_not_call"
 
 
 async def test_call_lifecycle_events_are_emitted_in_order():

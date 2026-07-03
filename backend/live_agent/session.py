@@ -74,6 +74,24 @@ _END_CALL_OUTCOMES = {
     "not_qualified": LiveOutcome.NOT_QUALIFIED,
 }
 
+# LiveOutcome -> the events contract's LeadOutcome vocabulary (backend.events.payloads).
+# The two enums differ (Live has booked/opted_out/failed/ended; the audit log speaks
+# qualified/not_qualified/no_answer/.../do_not_call/error), so LEAD_OUTCOME must be
+# translated or the emit is rejected at the validating sink.
+_EVENT_OUTCOME = {
+    LiveOutcome.BOOKED: "qualified",       # a held meeting is, by definition, a qualified lead
+    LiveOutcome.QUALIFIED: "qualified",
+    LiveOutcome.NOT_QUALIFIED: "not_qualified",
+    LiveOutcome.OPTED_OUT: "do_not_call",
+    LiveOutcome.NO_ANSWER: "no_answer",
+    LiveOutcome.FAILED: "error",
+    LiveOutcome.ENDED: "no_answer",        # ended with no explicit qualification signal
+}
+
+
+def _event_outcome(outcome: LiveOutcome) -> str:
+    return _EVENT_OUTCOME.get(outcome, "error")
+
 # Spoken by cutting Live off mid-call (never routed through the model) — same text,
 # same rationale as `CallEngine.OPT_OUT_ACK` (a locked DNC guardrail, D-security).
 OPT_OUT_ACK = (
@@ -194,8 +212,8 @@ class GeminiLiveAgentSession:
         outcome = state.outcome or (
             LiveOutcome.QUALIFIED if state.lead_spoke else LiveOutcome.NO_ANSWER
         )
-        await emitter.emit(EventType.LEAD_OUTCOME, {"outcome": outcome.value})
-        await emitter.emit(EventType.CALL_ENDED, {"outcome": outcome.value})
+        await emitter.emit(EventType.LEAD_OUTCOME, {"outcome": _event_outcome(outcome)})
+        await emitter.emit(EventType.CALL_ENDED, {"ended_reason": outcome.value})
         return outcome
 
     # -------------------------------------------------------- code-spoken --- #
@@ -224,7 +242,7 @@ class GeminiLiveAgentSession:
         else:
             await emitter.emit(
                 EventType.GUARDRAIL_TRIPPED,
-                {"reason": "disclosure_missing", "opening": opening_text},
+                {"guardrail": "disclosure_missing", "detail": opening_text},
                 severity=Severity.CRITICAL,
             )
             await transport.send_event({"type": "moderation", "verdict": "flag"})
@@ -370,7 +388,7 @@ class GeminiLiveAgentSession:
             await transport.cut_playback()
             await emitter.emit(
                 EventType.GUARDRAIL_TRIPPED,
-                {"reason": "moderation_block", "text": state.output_text},
+                {"guardrail": "moderation_block", "detail": state.output_text},
                 severity=Severity.WARNING,
             )
             await transport.send_event({"type": "moderation", "verdict": verdict.value})
@@ -394,11 +412,12 @@ class GeminiLiveAgentSession:
             if call.name == END_CALL_TOOL:
                 responses.append(await self._handle_end_call(call, transport, emitter, state))
                 continue
-            await emitter.emit(EventType.TOOL_INVOKED, {"tool": call.name, "args": call.args})
-            # UI-shaped, not audit-shaped (contracts.events.EventType has no tool
-            # type of its own) — Live only ever declares IN_CALL tools (P4-1's
-            # compiler never exposes a POST_CALL one), so timing is always in_call
-            # for anything reaching this handler.
+            await emitter.emit(
+                EventType.TOOL_INVOKED, {"tool_name": call.name, "params": dict(call.args)}
+            )
+            # transport event is UI-shaped (contracts.events has no tool type of its own)
+            # — Live only ever declares IN_CALL tools (P4-1's compiler never exposes a
+            # POST_CALL one), so timing is always in_call for anything reaching here.
             await transport.send_event({"type": "tool", "name": call.name, "timing": "in_call"})
             tool_ctx = _resolve_tool_context(registry, call.name, ctx)
             try:
@@ -407,14 +426,20 @@ class GeminiLiveAgentSession:
             except Exception as exc:  # handler rejected (guardrail) or failed
                 await emitter.emit(
                     EventType.GUARDRAIL_TRIPPED,
-                    {"tool": call.name, "reason": str(exc)},
+                    {"guardrail": "tool_error", "detail": f"{call.name}: {exc}"},
                     severity=Severity.WARNING,
                 )
                 result = {"ok": False, "error": str(exc)}
 
             if isinstance(result, dict) and result.get("booked") is True:
                 state.outcome = LiveOutcome.BOOKED
-                await emitter.emit(EventType.SLOT_BOOKED, {"result": result})
+                await emitter.emit(
+                    EventType.SLOT_BOOKED,
+                    {
+                        "slot_start": result.get("start_iso", ""),
+                        "slot_end": result.get("end_iso"),
+                    },
+                )
 
             responses.append({"id": call.id, "name": call.name, "response": result})
 
@@ -436,7 +461,9 @@ class GeminiLiveAgentSession:
         if state.outcome is not LiveOutcome.BOOKED:
             state.outcome = judged or state.outcome or LiveOutcome.ENDED
         state.hangup = True
-        await emitter.emit(EventType.TOOL_INVOKED, {"tool": END_CALL_TOOL, "args": call.args})
+        await emitter.emit(
+            EventType.TOOL_INVOKED, {"tool_name": END_CALL_TOOL, "params": dict(call.args)}
+        )
         await transport.send_event({"type": "outcome", "outcome": state.outcome.value})
         return {"id": call.id, "name": call.name, "response": {"ok": True}}
 

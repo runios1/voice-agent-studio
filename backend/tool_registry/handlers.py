@@ -81,19 +81,23 @@ class _BaseHandler:
         )
 
     async def _emit_invoked(self, ctx: ToolContext, **payload) -> None:
+        # ToolInvokedPayload REQUIRES `tool_name` (backend.events.payloads); extra keys
+        # (e.g. provider_event_id) ride along under extra="allow".
         await self._sink.emit(
-            _event(EventType.TOOL_INVOKED, ctx, tool=self.tool_name, **payload)
+            _event(EventType.TOOL_INVOKED, ctx, tool_name=self.tool_name, **payload)
         )
 
     async def _trip(self, ctx: ToolContext, violation: GuardrailViolation) -> None:
+        # GuardrailTrippedPayload REQUIRES `guardrail` (also what auto-pause counts) and
+        # takes an optional `detail`; param rides along as an extra.
         await self._sink.emit(
             _event(
                 EventType.GUARDRAIL_TRIPPED,
                 ctx,
                 severity=Severity.WARNING,
-                tool=self.tool_name,
+                guardrail=self.tool_name,
+                detail=violation.message,
                 param=violation.param,
-                reason=violation.message,
             )
         )
 
@@ -128,8 +132,8 @@ class CalendarHandler(_BaseHandler):
             _event(
                 EventType.SLOT_BOOKED,
                 ctx,
-                start_iso=slot.start_iso,
-                end_iso=slot.end_iso,
+                slot_start=slot.start_iso,  # SlotBookedPayload REQUIRES slot_start
+                slot_end=slot.end_iso,
                 provider_event_id=slot.provider_event_id,
             )
         )
