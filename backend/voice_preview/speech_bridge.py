@@ -21,6 +21,7 @@ lazily imported so a key-less/SDK-less checkout still runs the whole test suite)
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import AsyncIterator, Optional, Protocol
 
@@ -98,6 +99,12 @@ class GeminiLiveSpeechBridge:
         self._client = None
         self._stt_cm = None
         self._stt_session = None
+        self._types = None
+        # Finalized lead utterances, produced by the background reader and drained by
+        # feed_audio. Decoupling reads from sends is the whole point (see below).
+        self._utterances: "asyncio.Queue[str]" = asyncio.Queue()
+        self._partial = ""
+        self._reader: Optional[asyncio.Task] = None
 
     async def start(self) -> None:  # pragma: no cover - live leg, see DONE.md
         import google.genai as genai
@@ -106,8 +113,8 @@ class GeminiLiveSpeechBridge:
         self._types = types
         self._client = genai.Client(api_key=self._api_key)
         # The Live models are audio-native and REJECT a TEXT response modality (API
-        # error 1007). For STT we ask for AUDIO + input transcription and simply read
-        # the lead's `input_transcription`, ignoring the model's own audio turn — the
+        # error 1007). For STT we ask for AUDIO + input transcription and read the
+        # lead's `input_transcription`, ignoring the model's own audio turn — the
         # spoken REPLY is still authored by the CallEngine over ModelWrapper (so the
         # code-emitted disclosure + tools are never bypassed). See DONE.md.
         self._stt_cm = self._client.aio.live.connect(
@@ -118,25 +125,49 @@ class GeminiLiveSpeechBridge:
             ),
         )
         self._stt_session = await self._stt_cm.__aenter__()
+        # CRITICAL: read the session in a BACKGROUND task, not inside feed_audio.
+        # A Live `receive()` blocks until the model emits `turn_complete`, which only
+        # happens after the lead stops speaking — but that requires their WHOLE
+        # utterance to have been sent first. Reading inside feed_audio deadlocked:
+        # the first tiny frame blocked the send loop, so no further audio ever reached
+        # the model and turn_complete never fired (nothing was ever "heard"). The
+        # reader accumulates input transcription and enqueues a finalized utterance on
+        # each turn boundary; sending stays independent and non-blocking.
+        self._reader = asyncio.create_task(self._read_loop())
+
+    async def _read_loop(self) -> None:  # pragma: no cover - live leg
+        try:
+            async for response in self._stt_session.receive():
+                sc = getattr(response, "server_content", None)
+                if sc is None:
+                    continue
+                tr = getattr(sc, "input_transcription", None)
+                if tr and tr.text:
+                    self._partial += tr.text
+                if getattr(sc, "turn_complete", False):
+                    text = self._partial.strip()
+                    self._partial = ""
+                    if text:
+                        self._utterances.put_nowait(text)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Session closed / errored — stop reading; close() tears the rest down.
+            return
 
     async def feed_audio(self, chunk: bytes) -> Optional[str]:  # pragma: no cover
         types = self._types
+        # Send only — never block on a read here (that was the deadlock).
         await self._stt_session.send_realtime_input(
             audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
         )
-        # Drain whatever Gemini has ready for this push. A production hardening step
-        # (documented, not done here — see DONE.md) is a dedicated background reader
-        # task decoupled from `feed_audio`, so a slow transcription doesn't stall the
-        # next inbound chunk; correctness (never losing/reordering text) holds either
-        # way because the queue this feeds is FIFO.
-        text: Optional[str] = None
-        async for response in self._stt_session.receive():
-            transcription = getattr(response.server_content, "input_transcription", None)
-            if transcription and transcription.text:
-                text = (text or "") + transcription.text
-            if getattr(response.server_content, "turn_complete", False):
-                break
-        return text
+        # Surface a finalized utterance if the background reader produced one. Frames
+        # stream continuously (incl. silence), so a queued utterance is drained within
+        # a frame of the lead finishing their turn.
+        try:
+            return self._utterances.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:  # pragma: no cover
         types = self._types
@@ -158,8 +189,17 @@ class GeminiLiveSpeechBridge:
                         yield data
 
     async def close(self) -> None:  # pragma: no cover
+        if self._reader is not None:
+            self._reader.cancel()
+            try:
+                await self._reader
+            except (asyncio.CancelledError, Exception):
+                pass
         if self._stt_cm is not None:
-            await self._stt_cm.__aexit__(None, None, None)
+            try:
+                await self._stt_cm.__aexit__(None, None, None)
+            except Exception:
+                pass
 
 
 def build_speech_bridge() -> SpeechBridge:

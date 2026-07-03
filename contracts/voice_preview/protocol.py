@@ -30,7 +30,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 # --- audio format (both directions) ------------------------------------------------------ #
-AUDIO_SAMPLE_RATE_HZ = 16_000
+AUDIO_SAMPLE_RATE_HZ = 16_000          # INPUT: lead mic -> server (Gemini Live wants 16 kHz)
+AUDIO_OUTPUT_SAMPLE_RATE_HZ = 24_000   # OUTPUT: agent audio <- server (Gemini Live emits 24 kHz)
 AUDIO_CHANNELS = 1
 AUDIO_SAMPLE_FORMAT = "pcm_s16le"  # signed 16-bit little-endian
 WS_ROUTE_TEMPLATE = "/api/agents/{agent_id}/preview/voice"

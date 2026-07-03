@@ -5,7 +5,8 @@
  * divergence.
  */
 
-export const AUDIO_SAMPLE_RATE_HZ = 16_000;
+export const AUDIO_SAMPLE_RATE_HZ = 16_000; // INPUT: lead mic -> server (Gemini Live wants 16 kHz)
+export const AUDIO_OUTPUT_SAMPLE_RATE_HZ = 24_000; // OUTPUT: agent audio <- server (Gemini Live emits 24 kHz)
 export const AUDIO_CHANNELS = 1;
 export const AUDIO_SAMPLE_FORMAT = "pcm_s16le";
 export const WS_ROUTE_TEMPLATE = "/api/agents/{agent_id}/preview/voice";

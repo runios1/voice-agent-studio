@@ -51,7 +51,16 @@ export interface MicCapture {
 export async function startMicCapture(
   onFrame: (frame: ArrayBuffer) => void,
 ): Promise<MicCapture> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // Force echo cancellation + noise suppression: without them the mic picks up the
+  // agent's own audio from the speakers and STT transcribes it as if the user said
+  // it, so the agent ends up talking to itself. (Headphones also solve this.)
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
   const context = new AudioContext();
   const blobUrl = URL.createObjectURL(
     new Blob([WORKLET_SOURCE], { type: "application/javascript" }),

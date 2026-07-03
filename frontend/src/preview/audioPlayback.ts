@@ -1,9 +1,11 @@
 /**
- * Plays incoming binary agent-audio frames (16 kHz mono PCM s16le) back-to-back
- * with no gaps: each pushed frame is scheduled to start exactly when the previous
- * one ends (or immediately, if playback has caught up).
+ * Plays incoming binary agent-audio frames (24 kHz mono PCM s16le — Gemini Live's
+ * output rate, distinct from the 16 kHz mic input) back-to-back with no gaps: each
+ * pushed frame is scheduled to start exactly when the previous one ends (or
+ * immediately, if playback has caught up). Playing 24 kHz audio at 16 kHz is what
+ * made the agent sound in slow motion.
  */
-import { AUDIO_SAMPLE_RATE_HZ } from "./protocol";
+import { AUDIO_OUTPUT_SAMPLE_RATE_HZ } from "./protocol";
 
 export interface PlaybackQueue {
   push(frame: ArrayBuffer): void;
@@ -18,7 +20,7 @@ export function createPlaybackQueue(): PlaybackQueue {
     push(frame: ArrayBuffer) {
       const samples = new Int16Array(frame);
       if (!samples.length) return;
-      const buffer = context.createBuffer(1, samples.length, AUDIO_SAMPLE_RATE_HZ);
+      const buffer = context.createBuffer(1, samples.length, AUDIO_OUTPUT_SAMPLE_RATE_HZ);
       const channel = buffer.getChannelData(0);
       for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 0x8000;
 
