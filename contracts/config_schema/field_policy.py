@@ -68,6 +68,9 @@ FIELD_POLICY: list[FieldPolicy] = [
     FieldPolicy(path="conversation.primary_objective",     owner_layer=Layer.USER, mutability=Mutability.DEFAULT, required_for_ready=True),
     FieldPolicy(path="conversation.qualification.criteria", owner_layer=Layer.USER, mutability=Mutability.OPEN,   required_for_ready=True),
     FieldPolicy(path="conversation.objections",            owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=False),
+    # Wrap-up flow (P4-5). Additive + optional — the Live compiler (P4-1) has real
+    # material once set, but an agent that never touches it is unaffected.
+    FieldPolicy(path="conversation.closing",                owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=False),
     FieldPolicy(path="conversation.custom_instructions",   owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=False),
     FieldPolicy(path="automation.calendar",                owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=False),
     FieldPolicy(path="automation.email",                   owner_layer=Layer.USER, mutability=Mutability.OPEN,    required_for_ready=False),
