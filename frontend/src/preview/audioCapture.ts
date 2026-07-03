@@ -95,27 +95,7 @@ export async function startMicCapture(
   const worklet = new AudioWorkletNode(context, WORKLET_NAME, {
     processorOptions: { targetRate: AUDIO_SAMPLE_RATE_HZ },
   });
-  // Dev meter: prove whether the mic is actually capturing sound. Logs the loudest
-  // frame roughly once a second — if this stays near 0 while you talk, the mic itself
-  // is silent (device/permission/context), not anything downstream.
-  let meterPeak = 0;
-  let meterAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
-  worklet.port.onmessage = (event) => {
-    const buf = event.data as ArrayBuffer;
-    const samples = new Int16Array(buf);
-    for (let i = 0; i < samples.length; i++) {
-      const a = Math.abs(samples[i]);
-      if (a > meterPeak) meterPeak = a;
-    }
-    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (now - meterAt >= 1000) {
-      // eslint-disable-next-line no-console
-      console.log(`[mic] peak amplitude ${meterPeak}/32767 (${((meterPeak / 32767) * 100) | 0}%)`);
-      meterPeak = 0;
-      meterAt = now;
-    }
-    onFrame(buf);
-  };
+  worklet.port.onmessage = (event) => onFrame(event.data as ArrayBuffer);
   source.connect(worklet);
   // Some engines only pull an AudioWorkletNode once it reaches a sink; give it one that
   // outputs nothing so process() runs reliably even though we don't want to hear the mic.
