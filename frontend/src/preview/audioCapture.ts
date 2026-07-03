@@ -4,8 +4,14 @@
  * AudioWorklet (off the main thread) via a Blob-URL module, so no extra static
  * asset/build wiring is needed for the one processor this needs.
  *
- * Plain integer decimation (no anti-alias filter) — sufficient for speech-quality
- * preview audio without pulling in a resampling library.
+ * IMPORTANT: this must resample properly, not just drop samples. Plain integer
+ * decimation aliases speech badly enough that Gemini Live's ASR can't transcribe it
+ * (the agent's VAD still fires on the energy, so it pauses — but never "hears" a
+ * word, so it never replies). We use box-filter averaging: each output sample is the
+ * mean of the input samples in its window, which low-passes as it decimates and
+ * handles a fractional source:target ratio (e.g. 48000:16000 = 3, 44100:16000 ≈ 2.76).
+ * Validated end-to-end against the live model — averaged audio transcribes; decimated
+ * audio does not.
  */
 import { AUDIO_SAMPLE_RATE_HZ } from "./protocol";
 
@@ -16,25 +22,29 @@ class PcmDownsampler extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this._ratio = sampleRate / (options.processorOptions?.targetRate ?? ${AUDIO_SAMPLE_RATE_HZ});
-    this._acc = 0;
+    this._sum = 0;      // running sum of the current output window
+    this._count = 0;    // input samples accumulated into it
+    this._need = this._ratio; // input samples still owed before we emit one output sample
   }
   process(inputs) {
     const channel = inputs[0]?.[0];
     if (channel && channel.length) {
       const kept = [];
       for (let i = 0; i < channel.length; i++) {
-        this._acc += 1;
-        if (this._acc >= this._ratio) {
-          this._acc -= this._ratio;
-          kept.push(channel[i]);
+        this._sum += channel[i];
+        this._count += 1;
+        this._need -= 1;
+        if (this._need <= 0) {
+          const avg = this._count ? this._sum / this._count : 0;
+          const s = Math.max(-1, Math.min(1, avg));
+          kept.push(s < 0 ? s * 0x8000 : s * 0x7fff);
+          this._sum = 0;
+          this._count = 0;
+          this._need += this._ratio; // carry the fraction so the rate stays exact
         }
       }
       if (kept.length) {
-        const pcm = new Int16Array(kept.length);
-        for (let i = 0; i < kept.length; i++) {
-          const s = Math.max(-1, Math.min(1, kept[i]));
-          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-        }
+        const pcm = Int16Array.from(kept);
         this.port.postMessage(pcm.buffer, [pcm.buffer]);
       }
     }
