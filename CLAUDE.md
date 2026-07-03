@@ -55,6 +55,16 @@ picture in mind and flag any choice that would cap a future capability.
   slot behind existing frozen seams (D9), so the critical path is just three small new
   contracts.
 
+- **Phase 4: Live-native conversational agent** (plan: `docs/phase4-plan.md`; kit:
+  `docs/phase4-workstream-prompts.md`; contract: `contracts/live_agent/`). The pivot:
+  **Gemini Live IS the agent** (audio-to-audio, ~1s, natural, native tool-calling) rather
+  than a text brain + slow generative TTS (~3s, not real-time). The security spine is
+  RELOCATED, not dropped: tools stay guarded in code (Live only requests; handlers enforce),
+  the AI disclosure is spoken in code before Live connects, and Live's output transcription is
+  screened with a small audio buffer (a net, not the floor). Config schema, builder, tool
+  handlers, events, orchestrator, connections all carry over. Live model
+  `gemini-3.1-flash-live-preview`; 16 kHz in / 24 kHz out.
+
 ## 3. The agent model (the keystone)
 
 An agent is a **structured config object with free-text pockets** — never a prompt
