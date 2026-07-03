@@ -24,9 +24,7 @@ Run:  set -a && source .env && set +a          # Phase-1 needs GEMINI_API_KEY
 
 from __future__ import annotations
 
-import asyncio
-from contextlib import suppress
-from typing import Optional
+import logging
 
 from fastapi import FastAPI
 
@@ -46,31 +44,52 @@ from backend.orchestrator.control_api import (
     create_router as create_orch_router,
     current_user,
 )
-from backend.orchestrator.mocks import ScriptedDialer
-from backend.orchestrator.service import OrchestratorService
-from backend.phase2_app import (
-    DEV_USER,
-    EventServiceSink,
-    _DefaultConfigSource,
-    _inline_seed,
-    _resolve_seed_and_run,
+from backend.phase2_app import DEV_USER, EventServiceSink
+
+from backend.integration.config_source import AgentServiceConfigSource
+from backend.integration.dialer import RealDialer
+from backend.integration.runtime import (
+    build_call_engine,
+    build_tool_stack,
+    make_transport_factory,
+    retell_configured,
 )
+from backend.integration.persistence import (
+    build_event_service,
+    build_orchestrator_repository,
+)
+from backend.integration.supervisor import SupervisedOrchestrator
+
+log = logging.getLogger("voice_agent_studio.integrated")
 
 
 def build_app() -> FastAPI:
     # Base = the Phase-1 studio app (its routes, seeded demo agent, config-gate error
     # handler, and current_user override are already installed inside build_studio_app).
     app = build_studio_app()
+    # Reuse the studio's already-built singletons (exposed on app.state): campaigns must
+    # run the SAME agent the builder edits, and reuse the SAME screened model wrapper.
+    service = app.state.agent_service
+    model = app.state.model
 
     # --- Phase-2: the one shared event log, threaded as the orchestrator's sink ---- #
-    events = EventService()
-    orch = OrchestratorService(
-        config_source=_DefaultConfigSource(),
-        dialer=ScriptedDialer(),
-        sink=EventServiceSink(events),
+    events = build_event_service()  # Postgres store+bus when DATABASE_URL is set
+    sink = EventServiceSink(events)
+
+    # Real wiring (not stubs): the campaign loads the built AgentConfig, dials over the
+    # real voice CallEngine + per-agent tool registry, on a real Retell transport when
+    # configured (else a scripted mock so campaigns still run end-to-end).
+    tool_stack = build_tool_stack()
+    engine = build_call_engine(model, sink)
+    orch = SupervisedOrchestrator(
+        config_source=AgentServiceConfigSource(service),
+        dialer=RealDialer(engine, tool_stack, make_transport_factory(), sink),
+        repo=build_orchestrator_repository(),  # Postgres per-lead state when configured
+        sink=sink,
     )
     app.state.events = events
     app.state.orch = orch
+    app.state.tool_stack = tool_stack
 
     app.include_router(create_orch_router(orch), prefix="/api")
     app.include_router(create_events_router(events), prefix="/api")
@@ -82,30 +101,21 @@ def build_app() -> FastAPI:
     app.dependency_overrides[current_user] = lambda: DEV_USER
     app.dependency_overrides[current_tenant] = lambda: DEV_USER
 
-    # SEED (contract §4b.5): prefer INT-C's live demo motion; else a minimal inline seed.
-    # The base app has no lifespan we can extend, so drive the seed from startup/shutdown.
-    demo: dict[str, Optional[object]] = {"stop": None, "task": None}
-
     @app.on_event("startup")
-    async def _seed_phase2() -> None:
-        seed = _resolve_seed_and_run()
-        stop = asyncio.Event()
-        demo["stop"] = stop
-        if seed is not None:
-            demo["task"] = asyncio.create_task(seed(orch, events, tenant=DEV_USER, stop=stop))
-        else:
-            await _inline_seed(orch)
+    async def _prime() -> None:
+        # Dev: seed placeholder tool connections so the MOCK calendar/email clients run
+        # before real OAuth is wired (no-op once real providers are configured). Nothing
+        # auto-dials on boot — users authorize their OWN campaigns (real-product behavior).
+        tool_stack.ensure_dev_connections(DEV_USER)
+        log.info(
+            "integrated app ready — phone transport=%s",
+            "retell" if retell_configured() else "mock",
+        )
 
     @app.on_event("shutdown")
-    async def _stop_phase2() -> None:
-        stop = demo.get("stop")
-        if isinstance(stop, asyncio.Event):
-            stop.set()
-        task = demo.get("task")
-        if isinstance(task, asyncio.Task):
-            task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+    async def _drain() -> None:
+        # Stop launching new dials and cancel in-flight campaign loops for a clean exit.
+        await orch.shutdown()
 
     return app
 

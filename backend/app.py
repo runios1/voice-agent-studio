@@ -60,6 +60,7 @@ from backend.config_gate.api import (
 from backend.config_gate.completeness import evaluate_status
 from backend.config_gate.errors import GateError as ConfigGateError
 from backend.config_gate.repository import InMemoryConfigRepository
+from backend.integration.persistence import build_config_repository, using_postgres
 from backend.config_gate.service import AgentService
 
 # WS3 — builder loop
@@ -160,12 +161,23 @@ def build_app() -> FastAPI:
     # WS6 wrapped by WS5: every builder/runtime model call is screened in/out.
     model = IntegrationScreeningWrapper(GeminiWrapper(), build_screener())
 
-    repo = InMemoryConfigRepository()
-    _seed_demo_agent(repo)
+    # Postgres when DATABASE_URL is set (persists across restarts), else in-memory.
+    repo = build_config_repository()
+    if not using_postgres():
+        _seed_demo_agent(repo)  # dev convenience only — no seeded demo in a real DB
     service = AgentService(repo)  # WS2 default (mock free-text screener) is fine for dev
 
     builder_sessions = InMemorySessionStore()
     engine = RuntimeEngine(model)  # WS4 preview engine (frontier tier stand-in)
+
+    # Expose the shared singletons so the integration layer can compose real Phase-2
+    # wiring on top of this app WITHOUT rebuilding them: the campaign orchestrator must
+    # run the SAME agent the builder edits (one config artifact), and reuse the SAME
+    # screened model wrapper. Not a request seam — internal composition only.
+    app.state.agent_service = service
+    app.state.config_repo = repo
+    app.state.model = model
+    app.state.builder_sessions = builder_sessions
 
     # --- WS2 router (agents + manual PATCH) -------------------------------- #
     app.include_router(create_gate_router(service), prefix="/api")

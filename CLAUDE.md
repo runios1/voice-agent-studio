@@ -45,6 +45,16 @@ picture in mind and flag any choice that would cap a future capability.
   **structured event stream** that also powers auto-pause and the compliance audit
   log. Runtime provider stays behind an interface (Retell → LiveKit swap).
 
+- **Phase 3: connect to everything** (plan: `docs/phase3-plan.md`; dispatch kit:
+  `docs/phase3-workstream-prompts.md`). Real calendar + email (behind the frozen
+  `provider_clients` seam), real outbound phone (RetellTransport behind the frozen
+  `CallTransport`), a live **talking preview** (browser mic ⇄ Gemini Live, new
+  `voice_preview` contract), and OAuth tool-connect (`connections_http`). The
+  **integration backbone** already lives in `backend/integration/` (real ConfigSource,
+  auto-running orchestrator, real dialer, provider/persistence switches) — real adapters
+  slot behind existing frozen seams (D9), so the critical path is just three small new
+  contracts.
+
 ## 3. The agent model (the keystone)
 
 An agent is a **structured config object with free-text pockets** — never a prompt

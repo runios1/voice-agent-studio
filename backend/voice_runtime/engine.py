@@ -244,7 +244,22 @@ class CallEngine:
         await emitter.emit(
             EventType.TOOL_INVOKED, {"tool": call.name, "args": call.arguments}
         )
-        ctx = context_for(session)
+        # The registry OWNS connection resolution (contract: "a handler never picks its
+        # own tenant"). A real registry exposes `resolve_context`, which looks up the
+        # tenant's own connection for the tool's provider; we prefer it so real handlers
+        # (calendar/email) receive `ctx.connection`. A registry without it (bare mock)
+        # falls back to the correlation-id-only context. Duck-typed like `transfer`, so
+        # the frozen `ToolRegistry` Protocol is untouched.
+        resolve = getattr(registry, "resolve_context", None)
+        if callable(resolve):
+            ctx = resolve(
+                call.name,
+                session.tenant_id,
+                campaign_id=session.campaign_id,
+                lead_id=session.lead_id,
+            )
+        else:
+            ctx = context_for(session)
         try:
             handler = registry.handler_for(call.name)
             result = await handler.execute(call.arguments, ctx)
