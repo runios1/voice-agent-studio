@@ -3,6 +3,18 @@
 All six workstreams are wired into one FastAPI app by `backend/app.py` (the
 integration assembly). The frontend talks to it through the Vite `/api` proxy.
 
+> **Full stack (Phase 1 + Phase 2) in one backend:** run `backend/integrated_app.py`
+> instead of `backend/app.py`. It composes the studio assembly (`/api/agents`, builder,
+> preview) with the ops-dashboard assembly (`/api/campaigns`, `/api/events`) so BOTH
+> frontend surfaces work against one `:8000`. Running only one of the two apps 404s the
+> other surface.
+> ```bash
+> set -a && source .env && set +a
+> python -m uvicorn backend.integrated_app:app --host 127.0.0.1 --port 8000
+> # frontend (real mode, serves both / and /dashboard.html):
+> cd frontend && VITE_USE_MOCK=false npm run dev
+> ```
+
 ## Prerequisites
 - A Gemini API key in `.env` at the repo root (gitignored):
   ```
