@@ -48,6 +48,15 @@ export function App({ api, agentId }: { api: AgentApi; agentId: string }) {
             Preview
           </TabButton>
         </nav>
+        {/* Cross-link to the operations dashboard (P2-7). Separate entry/root, so a
+            plain navigation rather than an in-app tab — keeps the two surfaces and
+            their stores decoupled while making the dashboard discoverable. */}
+        <a
+          href="/dashboard.html"
+          className="ml-auto text-sm text-muted hover:text-ink"
+        >
+          Operations dashboard ↗
+        </a>
       </header>
 
       {error && (

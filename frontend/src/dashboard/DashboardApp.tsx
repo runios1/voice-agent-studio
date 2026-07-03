@@ -51,6 +51,10 @@ export function DashboardApp({ api }: { api: DashboardApi }) {
             Audit
           </TabButton>
         </nav>
+        {/* Link back to the builder studio (separate entry/root). */}
+        <a href="/" className="text-sm text-muted hover:text-ink">
+          ← Agent studio
+        </a>
         <span
           data-testid="connection"
           className="ml-auto flex items-center gap-1.5 text-xs text-muted"

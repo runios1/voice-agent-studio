@@ -1,12 +1,23 @@
 /// <reference types="vitest/config" />
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Phase 1: the backend (workstreams 2–6) is not wired yet, so `dev` proxies
-// /api to a local FastAPI once it exists. Until then the UI runs against mock
-// fixtures (see src/dev/mockApi.ts).
+// `dev` proxies /api to the local FastAPI (real mode: VITE_USE_MOCK=false); until a
+// backend is up the UI runs against mock fixtures (src/dev/mockApi.ts).
 export default defineConfig({
   plugins: [react()],
+  // Two HTML entries: the builder studio (index.html) and the operations dashboard
+  // (dashboard.html). Both must be emitted so the header cross-links resolve in a
+  // production build, not just under the dev server.
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        dashboard: resolve(__dirname, "dashboard.html"),
+      },
+    },
+  },
   server: {
     proxy: {
       "/api": {
