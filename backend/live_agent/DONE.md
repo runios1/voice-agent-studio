@@ -124,9 +124,11 @@ from `contracts/live_agent/interface.py`.
   `run()` mints one per conversation). Audit-log-shaped events
   (`CALL_STARTED`/`DISCLOSURE_SPOKEN`/`TOOL_INVOKED`/`GUARDRAIL_TRIPPED`/
   `SLOT_BOOKED`/`LEAD_OUTCOME`/`CALL_ENDED`) go to the `EventSink`; UI-shaped events
-  (`transcript`/`disclosure`/`moderation`/`error`) go to `transport.send_event` — no
-  frozen contract governs that second shape (P4-4 owns the wire), kept close to the
-  existing `voice_preview` JSON message shapes.
+  (`transcript`/`disclosure`/`tool`/`moderation`/`error`) go to `transport.send_event`
+  — no frozen contract governs that second shape; P4-4 owns the wire and documents
+  the exact dict shapes in a CCR (see the P4-4 section below). The `tool` event was
+  added to this file at P4-4's merge to close that gap (P4-2 originally only logged
+  tool calls to the `EventSink`, with nothing on the UI wire).
 
 ### What's mocked (tests, no network)
 `backend/live_agent/tests/fakes.py`: `FakeAudioTransport`, `FakeLiveConnection` +
@@ -159,10 +161,10 @@ whole package's suite (compiler + moderation + session) runs together; see
    "finalized" (emitted as a `transcript` event, cleared) the moment the agent's
    *next* reply starts producing output transcription. Good enough for
    disclosure/opt-out/transcript UX; not exact turn-boundary science.
-5. **Event split** (audit `EventSink` vs. UI `transport.send_event`): `transcript`
-   and `moderation` events are NOT in the frozen `contracts.events.EventType` enum
-   (audit log has no such types) — deliberately kept on the UI channel instead of
-   proposing an enum change for something that's arguably UI-only.
+5. **Event split** (audit `EventSink` vs. UI `transport.send_event`): `transcript`,
+   `tool`, and `moderation` events are NOT in the frozen `contracts.events.EventType`
+   enum (audit log has no such types) — deliberately kept on the UI channel instead
+   of proposing an enum change for something that's arguably UI-only.
 
 ### Real API surface (smoke only, `# pragma: no cover` in `live_connection.py` / `speaker.py`)
 `_LiveConnectionCM.__aenter__` opens `client.aio.live.connect(model=..., config=
@@ -189,6 +191,111 @@ off-guardrail ask gets cut) once `GEMINI_API_KEY` is available.
   (`LiveAgentSpec`, `StreamModerator`) and needed zero changes to integrate with
   the real implementations — tests still use `ScriptedModerator`/hand-built specs
   for speed and to keep the moderator's screener dependency out of this suite.
+
+## P4-4 — Preview transport + frontend
+
+Implements the browser `AudioTransport` (`contracts/live_agent`) as a WS route that
+runs one `LiveAgentSession.run(...)` per connection, and the frontend that talks to
+it. Where Phase 3's preview had to bridge browser PCM <-> a text turn loop (STT in,
+TTS out), this transport has nothing to bridge — Gemini Live IS the agent, so audio
+flows straight through in both directions.
+
+### What's done
+
+**Backend — `backend/live_agent/preview_transport.py`**
+- `PreviewAudioTransport` — the frozen `AudioTransport`: `send_audio`/`recv_audio`
+  pass PCM straight through; `send_event` forwards the session's event dict
+  verbatim; `cut_playback()` sends a dedicated `{"type": "cut_playback"}` control
+  frame (the server can't reach into the browser's `AudioContext` directly — this
+  is the only way to make "silence NOW" real on the wire). Inbound audio has one
+  reader (the router's own WS loop); it's pushed in via `push_audio`/`push_stop`
+  into an `asyncio.Queue`, mirroring P3-4's `BrowserVoiceTransport`.
+- `create_router(config_source, registry_builder, compiler, sink, *,
+  session_factory, moderator_factory)` — `WS /agents/{agent_id}/preview/voice`
+  (same route as the Phase-3 contract; the integrator swaps which router is
+  mounted there). Per connection: resolve the caller's own built config
+  (tenant-scoped, 404 as a clean `error` frame, never a stack trace); wait for
+  `start`; compile the spec; build the registry; run `session.run(spec, transport,
+  registry, moderator, ctx)` concurrently with the inbound pump; send `ended` with
+  the returned `LiveOutcome` (or a calm `error` + `ended` if the session raised).
+
+**Frontend — `frontend/src/preview/`** (new files, existing P3 files untouched so
+the currently-mounted Phase-3 preview keeps working until the integrator retires it
+per the plan's integration order):
+- `livePreviewProtocol.ts` — re-exports the unchanged Phase-3 audio format/route,
+  adds `ToolMessage` / `ModerationMessage` / `CutPlaybackMessage`.
+- `liveVoiceSession.ts` — `LiveVoiceSession`, same shape as `VoiceSession` plus the
+  three new message types and a client-inferred speaking/listening indicator (Live
+  has no server-sent turn-boundary event; "agent" while audio frames are actively
+  arriving, decaying to "listening" after 300ms of silence or the instant the
+  user's own mic crosses the barge-in threshold).
+- `LiveVoicePreview.tsx` — same shell as `VoicePreview`, plus a speaking/listening
+  badge and inline tool/moderation badges.
+- Reuses `audioCapture.ts` / `audioPlayback.ts` unchanged (same audio rates).
+
+### What was mocked while building, reconciled at merge
+This workstream started before P4-1/2/3 existed, so its own tests drive a
+`_ScriptedSession`/`_FakeCompiler`/`_FakeModerator` behind the frozen
+`contracts/live_agent` Protocols — those fakes stay (they're the whole point of
+testing `preview_transport.py` in isolation). At merge time the *real* P4-2
+(`GeminiLiveAgentSession`) was found not to emit a `tool` UI event at all (only
+`TOOL_INVOKED` to the `EventSink`), which would have silently made this
+workstream's tool badge dead code. Fixed directly in `session.py::
+_handle_function_calls` (one `transport.send_event({"type": "tool", "name":
+call.name, "timing": "in_call"})` per call, right after `TOOL_INVOKED` is emitted —
+`timing` is always `"in_call"` here since Live is only ever declared IN_CALL tools,
+per P4-1's compiler) rather than left as a known gap, since P4-2's own docstring
+assigns UI-wire-shape ownership to P4-4.
+`ConfigSource`/`RegistryBuilder` mirror `backend.integration.config_source.
+AgentServiceConfigSource` / `backend.integration.runtime.ToolStack` exactly, same
+seam as P3-4.
+
+### Additive wire extension
+`tool` / `moderation` / `cut_playback` are new JSON message types layered onto the
+technically-frozen `contracts/voice_preview` wire — documented rather than silently
+edited: `docs/contract-change-requests/p4-4-live-preview-events.md`. Existing types
+and the audio format are unchanged. (`disclosure` also gained a `text` field from
+the real P4-2 — additive, ignored by clients that don't read it.)
+
+### Consumed contract points
+- `contracts/live_agent/interface.py`: `AudioTransport`, `LiveAgentCompiler`,
+  `LiveAgentSession`, `LiveCallContext`, `LiveOutcome`, `StreamModerator`,
+  `ModerationVerdict`.
+- `contracts/voice_preview/protocol.py`: audio format + route + base message set
+  (not touched).
+- `contracts/tool_registry/interface.py`: `ToolRegistry` (type only, opaque here).
+- `backend/voice_runtime/events.EventSink` — reused, not forked.
+
+### How to verify
+```bash
+python3 -m pytest backend/live_agent/tests/ -q          # whole package, this workstream's suite included
+cd frontend && npx vitest run src/preview               # 28 tests (17 new + 11 P3, unaffected)
+cd frontend && npx tsc -b                                 # clean build
+```
+
+### Integration notes for the integrator
+- Mount `create_router(...)` under `/api` at the SAME route the Phase-3 router
+  used, per the plan's integration order: retire the old `speech_bridge` preview
+  once this is green. Real factories: `session_factory=lambda: GeminiLiveAgentSession(sink)`,
+  `moderator_factory=build_stream_moderator` (or equivalent) — a fresh instance per
+  call, since both carry per-call state.
+- Frontend: swap `PreviewChat.tsx`'s `VoicePreview` import for `LiveVoicePreview`
+  once the backend is mounted; the old `frontend/src/preview/{voiceSession,
+  VoicePreview}.*` files can then be deleted (their P4 shape now lives in the
+  `live*` files).
+- No real Gemini Live smoke test lives here — P4-2 owns the Live connection, so the
+  live smoke belongs to that workstream. This package's own live-ness (the WS route
+  + audio pass-through) has no external dependency to smoke-test; it's fully
+  covered by the `TestClient` suite.
+
+### Boundaries respected
+Only `backend/live_agent/preview_transport.py` (+ its tests), one added line in
+`session.py` (see above, applied at merge to close a real interoperability gap
+between two already-built workstreams), and new files under
+`frontend/src/preview/` were written; `contracts/` untouched (additive extension
+filed as a CCR, not an edit); no route mounted in `integrated_app.py`; existing
+Phase-3 preview files/tests untouched and still green; no provider SDK imported
+anywhere in this package.
 
 ## How to verify (whole package, post-merge)
 ```bash

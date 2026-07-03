@@ -212,7 +212,9 @@ class GeminiLiveAgentSession:
         buffer_s = max(spec.moderation_buffer_ms, 0) / 1000.0
         async for event in conn.receive():
             if event.function_calls:
-                await self._handle_function_calls(event.function_calls, conn, registry, ctx, emitter, state)
+                await self._handle_function_calls(
+                    event.function_calls, conn, transport, registry, ctx, emitter, state
+                )
 
             if event.interrupted:
                 await transport.cut_playback()
@@ -311,6 +313,7 @@ class GeminiLiveAgentSession:
         self,
         calls: list[LiveFunctionCall],
         conn: LiveConnection,
+        transport: AudioTransport,
         registry: ToolRegistry,
         ctx: LiveCallContext,
         emitter: LiveEventEmitter,
@@ -319,6 +322,11 @@ class GeminiLiveAgentSession:
         responses: list[dict[str, Any]] = []
         for call in calls:
             await emitter.emit(EventType.TOOL_INVOKED, {"tool": call.name, "args": call.args})
+            # UI-shaped, not audit-shaped (contracts.events.EventType has no tool
+            # type of its own) — Live only ever declares IN_CALL tools (P4-1's
+            # compiler never exposes a POST_CALL one), so timing is always in_call
+            # for anything reaching this handler.
+            await transport.send_event({"type": "tool", "name": call.name, "timing": "in_call"})
             tool_ctx = _resolve_tool_context(registry, call.name, ctx)
             try:
                 handler = registry.handler_for(call.name)
