@@ -39,6 +39,7 @@ from backend.voice_runtime.transports import MockVoiceTransport, RetellTransport
 from backend.tool_registry.catalog import GOOGLE_CALENDAR, GMAIL
 from backend.tool_registry.connections import ConnectionManager, ConnectionStore
 from backend.tool_registry.credentials import EncryptedCredentialStore, generate_key
+from backend.tool_registry.integrations import MockCalendarClient
 from backend.tool_registry.oauth import (
     PROVIDER_SPECS,
     FakeOAuthProvider,
@@ -51,7 +52,6 @@ from backend.integration.providers import (
     build_calendar_client,
     build_email_client,
     calendar_is_real,
-    using_mock_clients,
 )
 
 
@@ -89,31 +89,33 @@ class ToolStack:
         )
 
     def ensure_dev_connections(self, tenant_id: str) -> None:
-        """Dev convenience: seed a calendar + email Connection (and a placeholder token)
-        for a tenant so the MOCK provider clients can run before real OAuth is wired.
+        """Seed placeholder tool Connections so the handlers' connection lookup succeeds
+        without a manual OAuth step where one isn't actually needed. Provider-aware:
 
-        No-op once a real connection exists for the provider, so this never clobbers a
-        token minted by the real OAuth flow. Guarded to the mock clients: with real
-        clients, a real OAuth connection is required (we don't fake a Google token)."""
-        if not using_mock_clients():
+          * CALENDAR uses per-tenant OAuth — a placeholder is only correct for the MOCK
+            client. With the real Google client we seed NOTHING: the tenant must genuinely
+            connect via the OAuth flow, and we never fake a Google token.
+          * EMAIL authenticates at the PLATFORM level (the mock records; Resend uses
+            RESEND_API_KEY) — never a per-tenant token. The handler only checks a connection
+            EXISTS, so a placeholder is correct whether email is mock OR Resend.
+
+        Idempotent: never clobbers a connection already present (e.g. a real OAuth token).
+        Decided by the ACTUAL client in this stack (not the env), so an injected mock in a
+        test is seeded even if provider env vars happen to be set."""
+        if isinstance(self.calendar_client, MockCalendarClient):
+            self._seed_placeholder_connection(tenant_id, GOOGLE_CALENDAR)
+        self._seed_placeholder_connection(tenant_id, GMAIL)
+
+    def _seed_placeholder_connection(self, tenant_id: str, provider: str) -> None:
+        if self.connections.for_provider(tenant_id, provider) is not None:
             return
-        for provider in (GOOGLE_CALENDAR, GMAIL):
-            if self.connections.for_provider(tenant_id, provider) is not None:
-                continue
-            ref = f"dev-{provider}-{tenant_id}"
-            self.connections.add(
-                Connection(
-                    tenant_id=tenant_id,
-                    provider=provider,
-                    connection_ref=ref,
-                    scopes=[],
-                )
-            )
-            # A non-empty token: the mock clients only assert it's present (a real 401
-            # shape); the real clients never see this branch.
-            self.credentials.put(
-                tenant_id, ref, provider, access_token="dev-placeholder-token"
-            )
+        ref = f"dev-{provider}-{tenant_id}"
+        self.connections.add(
+            Connection(tenant_id=tenant_id, provider=provider, connection_ref=ref, scopes=[])
+        )
+        # A non-empty token satisfies the handler's "connection is live" gate (a real
+        # 401-shape check). The mock records it; Resend ignores it (platform key auth).
+        self.credentials.put(tenant_id, ref, provider, access_token="dev-placeholder-token")
 
 
 async def _httpx_post(url: str, data: dict) -> dict:

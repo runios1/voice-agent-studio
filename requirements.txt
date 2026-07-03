@@ -39,12 +39,11 @@ pytest-asyncio>=0.23
 # psycopg[binary]>=3.1
 
 # Real outbound calling (RETELL_API_KEY) — backend/voice_runtime/transports.py
-# (RetellTransport, P3-3). Unset RETELL_API_KEY runs on MockVoiceTransport.
+# (RetellTransport, P3-3) imports BOTH lazily. Unset RETELL_API_KEY runs on
+# MockVoiceTransport.
 # retell-sdk>=1.0
+# websockets>=12.0
 
-# Real email sending (RESEND_API_KEY) — backend/integration/resend_email.py (P3-2).
-# Unset RESEND_API_KEY runs on the in-repo MockEmailClient.
-# resend>=2.0
-
-# Google Calendar + Model Armor both go over the httpx client above (no dedicated
-# SDK) — see contracts/provider_clients and backend/tool_registry/oauth.py.
+# Google Calendar, Resend email, and Model Armor all go over the httpx client above
+# (no dedicated SDK) — see contracts/provider_clients, backend/integration/resend_email.py,
+# and backend/tool_registry/oauth.py. Enabling them needs only their env keys.

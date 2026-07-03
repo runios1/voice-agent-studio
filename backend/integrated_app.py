@@ -65,6 +65,7 @@ from backend.integration.persistence import (
     build_orchestrator_repository,
 )
 from backend.integration.supervisor import SupervisedOrchestrator
+from backend.voice_preview.router import create_router as create_preview_router
 
 log = logging.getLogger("voice_agent_studio.integrated")
 
@@ -87,8 +88,9 @@ def build_app() -> FastAPI:
     # configured (else a scripted mock so campaigns still run end-to-end).
     tool_stack = build_tool_stack()
     engine = build_call_engine(model, sink)
+    config_source = AgentServiceConfigSource(service)
     orch = SupervisedOrchestrator(
-        config_source=AgentServiceConfigSource(service),
+        config_source=config_source,
         dialer=RealDialer(engine, tool_stack, make_transport_factory(), sink),
         repo=build_orchestrator_repository(),  # Postgres per-lead state when configured
         sink=sink,
@@ -111,6 +113,12 @@ def build_app() -> FastAPI:
             redirect_uri=f"{oauth_redirect_base}/api/oauth/callback",
             app_redirect_url=app_base_url,
         ),
+        prefix="/api",
+    )
+    # P3-4 — live talking preview: browser mic <-> Gemini Live over the SAME CallEngine
+    # + per-agent tool registry a real call uses. WS /api/agents/{id}/preview/voice.
+    app.include_router(
+        create_preview_router(config_source, tool_stack, model, sink),
         prefix="/api",
     )
     install_orch_error_handler(app)
