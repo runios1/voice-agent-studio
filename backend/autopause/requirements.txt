@@ -1,0 +1,4 @@
+# P2-6 — auto-pause / escalation engine
+pydantic>=2.0    # the frozen event contract (contracts/events) is pydantic v2
+# Dev/CI only:
+pytest>=7.0
