@@ -207,11 +207,17 @@ def create_router(
         run = asyncio.ensure_future(
             session.run(spec, transport, registry, moderator, ctx)
         )
+        # End the call when EITHER side hangs up: the caller (the inbound loop returns on
+        # a 'stop' / socket close) or the AGENT (run() completes after an end_call). Race
+        # them so an agent-initiated hang-up isn't blocked waiting on the caller to close.
+        inbound = asyncio.ensure_future(_pump_inbound(websocket, transport))
         try:
-            await _pump_inbound(websocket, transport)
+            await asyncio.wait({run, inbound}, return_when=asyncio.FIRST_COMPLETED)
         except Exception:
             log.exception("preview inbound loop failed for %s", agent_id)
-        transport.push_stop()
+        transport.push_stop()  # unblock the mic pump so run() can finish
+        if not inbound.done():
+            inbound.cancel()
 
         try:
             outcome = await run

@@ -286,6 +286,11 @@ def _closing_directions(config: AgentConfig) -> str:
             "- Always end with a brief, warm sign-off — thank them for their time "
             "either way."
         )
+    lines.append(
+        "- After your sign-off, you MUST call the end_call function to hang up, "
+        "passing outcome='qualified' or 'not_qualified' based on your judgment. The "
+        "call does not end until you do — don't wait for the other person to hang up."
+    )
 
     return "\n".join(lines)
 
@@ -319,12 +324,40 @@ def _lock_footer() -> str:
 # --------------------------------------------------------------------------- #
 # tool_declarations
 # --------------------------------------------------------------------------- #
+# The control function Live ALWAYS has, on top of any enabled automation tools: the
+# agent calls it to hang up once the call has concluded (session handles it directly —
+# no registry handler). This is what lets a call actually END on the agent's judgment.
+END_CALL_DECLARATION: dict = {
+    "name": "end_call",
+    "description": (
+        "End and hang up the phone call. Call this once the conversation has reached its "
+        "natural conclusion and you've delivered your closing sign-off — either because "
+        "the person is qualified and the next step is set, or because they are not a fit "
+        "or not interested. Say your goodbye first, then call this. Do not linger or wait "
+        "for the other person to hang up."
+    ),
+    "parameters": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "outcome": {
+                "type": "string",
+                "enum": ["qualified", "not_qualified"],
+                "description": "Your qualification judgment for this lead at the end of the call.",
+            },
+        },
+        "required": ["outcome"],
+    },
+}
+
+
 def _tool_declarations(config: AgentConfig) -> list[dict]:
-    """Live FunctionDeclarations (as plain JSON-schema dicts) for each ENABLED,
-    IN_CALL registry tool. Disabled automation yields no declaration — the model
-    has no function to call, so it structurally cannot act (D-security). POST_CALL
-    tools (email) are never declared here; they run as async workflows after the
-    call, unchanged from Phase 2 (`backend/voice_runtime/tools.py`)."""
+    """Live FunctionDeclarations (as plain JSON-schema dicts): each ENABLED, IN_CALL
+    registry tool, PLUS the always-present `end_call` control function. Disabled
+    automation yields no declaration — the model has no function to call, so it
+    structurally cannot act (D-security). POST_CALL tools (email) are never declared
+    here; they run as async workflows after the call, unchanged from Phase 2
+    (`backend/voice_runtime/tools.py`)."""
     catalog = {t.name: t for t in DEFAULT_CATALOG}
     declarations: list[dict] = []
 
@@ -333,6 +366,7 @@ def _tool_declarations(config: AgentConfig) -> list[dict]:
         if tool is not None and tool.timing == Timing.IN_CALL:
             declarations.append(_to_declaration(tool))
 
+    declarations.append(END_CALL_DECLARATION)
     return declarations
 
 

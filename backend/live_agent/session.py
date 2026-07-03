@@ -64,6 +64,16 @@ from backend.live_agent.live_connection import (
 from backend.live_agent.speaker import Speaker, default_speaker
 from backend.voice_runtime.outcomes import detect_opt_out
 
+# The one control function Live always has (declared by the compiler alongside any
+# real tools): the agent calls it to hang up once the conversation has concluded, so a
+# call ends when the AGENT decides it's over — not only when the human closes the tab.
+# It has no registry handler; the session handles it directly (see _handle_end_call).
+END_CALL_TOOL = "end_call"
+_END_CALL_OUTCOMES = {
+    "qualified": LiveOutcome.QUALIFIED,
+    "not_qualified": LiveOutcome.NOT_QUALIFIED,
+}
+
 # Spoken by cutting Live off mid-call (never routed through the model) — same text,
 # same rationale as `CallEngine.OPT_OUT_ACK` (a locked DNC guardrail, D-security).
 OPT_OUT_ACK = (
@@ -133,6 +143,7 @@ class _CallState:
     output_text: str = ""  # agent speech accumulated since the last turn_complete
     turn_has_output: bool = False
     disclosure_checked: bool = False  # the opening turn has been verified for the disclosure
+    hangup: bool = False  # the agent called end_call; end after its closing turn finishes
 
 
 class GeminiLiveAgentSession:
@@ -321,6 +332,10 @@ class GeminiLiveAgentSession:
                 state.output_text = ""
                 state.turn_has_output = False
                 state.blocked = False
+                if state.hangup:
+                    # the agent called end_call; its closing turn has now finished
+                    # playing — end the pump, which winds the call down (router hangs up).
+                    return
 
     # -------------------------------------------------------------- opt-out --- #
     async def _handle_opt_out(self, transport: AudioTransport, state: _CallState) -> None:
@@ -376,6 +391,9 @@ class GeminiLiveAgentSession:
     ) -> None:
         responses: list[dict[str, Any]] = []
         for call in calls:
+            if call.name == END_CALL_TOOL:
+                responses.append(await self._handle_end_call(call, transport, emitter, state))
+                continue
             await emitter.emit(EventType.TOOL_INVOKED, {"tool": call.name, "args": call.args})
             # UI-shaped, not audit-shaped (contracts.events.EventType has no tool
             # type of its own) — Live only ever declares IN_CALL tools (P4-1's
@@ -402,6 +420,25 @@ class GeminiLiveAgentSession:
 
         if responses:
             await conn.send_tool_response(responses)
+
+    async def _handle_end_call(
+        self,
+        call: LiveFunctionCall,
+        transport: AudioTransport,
+        emitter: LiveEventEmitter,
+        state: _CallState,
+    ) -> dict[str, Any]:
+        """The agent decided the call is over. Record the outcome it judged, surface it to
+        the UI now, and flag the hang-up so the pump ends once this closing turn finishes
+        (so the goodbye still plays). Never downgrades a booking already made this call."""
+        raw = str(call.args.get("outcome", "")).strip().lower()
+        judged = _END_CALL_OUTCOMES.get(raw)
+        if state.outcome is not LiveOutcome.BOOKED:
+            state.outcome = judged or state.outcome or LiveOutcome.ENDED
+        state.hangup = True
+        await emitter.emit(EventType.TOOL_INVOKED, {"tool": END_CALL_TOOL, "args": call.args})
+        await transport.send_event({"type": "outcome", "outcome": state.outcome.value})
+        return {"id": call.id, "name": call.name, "response": {"ok": True}}
 
 
 def _resolve_tool_context(registry: ToolRegistry, name: str, ctx: LiveCallContext) -> ToolContext:

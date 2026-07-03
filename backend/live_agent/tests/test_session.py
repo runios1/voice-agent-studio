@@ -223,6 +223,48 @@ async def test_native_barge_in_cuts_playback():
     assert transport.cut_count == 1
 
 
+async def test_agent_end_call_hangs_up_with_the_outcome():
+    """The agent calls end_call to conclude: the outcome is recorded + surfaced to the
+    UI, and the call ends after that turn (rather than waiting on the human)."""
+    connector = FakeLiveConnector(
+        [
+            LiveEvent(output_transcript_delta="Thanks, have a great day!", audio=b"bye"),
+            function_call("end-1", "end_call", outcome="qualified"),
+            LiveEvent(turn_complete=True),
+        ]
+    )
+    session, moderator = _session(connector)
+    transport = FakeAudioTransport()
+    registry = FakeToolRegistry({})
+
+    outcome = await session.run(_spec(), transport, registry, moderator, CTX)
+
+    assert outcome == LiveOutcome.QUALIFIED
+    outs = [e for e in transport.events if e.get("type") == "outcome"]
+    assert outs and outs[0]["outcome"] == "qualified"
+    # end_call was answered, so Live isn't left waiting on a function response
+    assert connector.connection.tool_responses
+    assert b"bye" in transport.sent_audio  # the goodbye still played
+
+
+async def test_end_call_does_not_downgrade_a_booking():
+    handler = FakeHandler(result={"ok": True, "booked": True})
+    registry = FakeToolRegistry({"calendar": handler})
+    connector = FakeLiveConnector(
+        [
+            function_call("c1", "calendar", start_iso="2026-01-02T10:00:00Z"),
+            function_call("e1", "end_call", outcome="not_qualified"),
+            LiveEvent(turn_complete=True),
+        ]
+    )
+    session, moderator = _session(connector)
+    transport = FakeAudioTransport()
+
+    outcome = await session.run(_spec(), transport, registry, moderator, CTX)
+
+    assert outcome == LiveOutcome.BOOKED  # a real booking outranks the model's label
+
+
 async def test_dnc_opt_out_ends_the_call_with_a_fixed_ack_bypassing_live():
     connector = FakeLiveConnector(
         [

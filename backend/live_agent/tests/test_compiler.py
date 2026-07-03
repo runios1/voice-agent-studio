@@ -101,21 +101,34 @@ def test_disclosure_line_falls_back_to_default_when_script_blank():
 # tool_declarations — structural denial: disabled automation -> no declaration.
 # Only IN_CALL tools (calendar) are ever declared; email (POST_CALL) never is.
 # --------------------------------------------------------------------------- #
-def test_no_automation_enabled_yields_no_tool_declarations():
+def _automation_tool_names(spec) -> list[str]:
+    """Declared tool names minus the always-present end_call control function."""
+    return [d["name"] for d in spec.tool_declarations if d["name"] != "end_call"]
+
+
+def test_end_call_is_always_declared():
+    """The agent always has a way to hang up, regardless of automation."""
+    spec = COMPILER.compile(sample_ready_config())
+    names = [d["name"] for d in spec.tool_declarations]
+    assert "end_call" in names
+    (end_call,) = [d for d in spec.tool_declarations if d["name"] == "end_call"]
+    assert end_call["parameters"]["properties"]["outcome"]["enum"] == ["qualified", "not_qualified"]
+
+
+def test_no_automation_enabled_yields_no_automation_tool_declarations():
     config = sample_ready_config()
     assert config.automation.calendar.enabled is False
     assert config.automation.email.enabled is False
     spec = COMPILER.compile(config)
-    assert spec.tool_declarations == []
+    assert _automation_tool_names(spec) == []  # only end_call is declared
 
 
 def test_calendar_enabled_yields_calendar_declaration_only():
     config = sample_ready_config()
     config.automation.calendar.enabled = True
     spec = COMPILER.compile(config)
-    names = [d["name"] for d in spec.tool_declarations]
-    assert names == ["calendar"]
-    (decl,) = spec.tool_declarations
+    assert _automation_tool_names(spec) == ["calendar"]
+    (decl,) = [d for d in spec.tool_declarations if d["name"] == "calendar"]
     assert decl["parameters"]["additionalProperties"] is False
     assert set(decl["parameters"]["properties"]) == {"start_iso"}
 
@@ -127,7 +140,7 @@ def test_email_enabled_never_yields_an_in_call_declaration():
     config.automation.email.enabled = True
     config.automation.email.template_ids = ["confirm_meeting"]
     spec = COMPILER.compile(config)
-    assert spec.tool_declarations == []
+    assert _automation_tool_names(spec) == []  # email not declared; only end_call
 
 
 def test_both_enabled_still_declares_only_calendar():
@@ -136,8 +149,7 @@ def test_both_enabled_still_declares_only_calendar():
     config.automation.email.enabled = True
     config.automation.email.template_ids = ["confirm_meeting"]
     spec = COMPILER.compile(config)
-    names = [d["name"] for d in spec.tool_declarations]
-    assert names == ["calendar"]
+    assert _automation_tool_names(spec) == ["calendar"]
 
 
 # --------------------------------------------------------------------------- #
