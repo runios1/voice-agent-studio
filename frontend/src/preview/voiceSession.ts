@@ -13,6 +13,13 @@ import { createPlaybackQueue, type PlaybackQueue } from "./audioPlayback";
 const WS_OPEN = 1; // WebSocket.OPEN — hardcoded so this module never touches the
 // global WebSocket constructor except via the (overridable) default factory.
 
+// Barge-in: when the mic frame's energy (Int16 RMS) crosses this, treat it as the user
+// speaking and mute the agent. Tunable; echo cancellation keeps the agent's own audio
+// well below it. Stay muted for the hangover after the last speech frame so a brief
+// pause mid-sentence doesn't let the agent talk over the user.
+const SPEECH_RMS_THRESHOLD = 2000;
+const DUCK_HANGOVER_MS = 600;
+
 export type SessionStatus = "idle" | "connecting" | "live" | "ended" | "error";
 
 export interface VoiceSessionCallbacks {
@@ -42,6 +49,15 @@ export interface VoiceSessionDeps {
   wsUrl?: (agentId: string) => string;
 }
 
+/** Cheap RMS voice-activity check on one 16 kHz Int16 PCM frame. */
+function hasSpeech(frame: ArrayBuffer): boolean {
+  const samples = new Int16Array(frame);
+  if (!samples.length) return false;
+  let sumSquares = 0;
+  for (let i = 0; i < samples.length; i++) sumSquares += samples[i] * samples[i];
+  return Math.sqrt(sumSquares / samples.length) > SPEECH_RMS_THRESHOLD;
+}
+
 function defaultWsUrl(agentId: string): string {
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${window.location.host}${voiceWsPath(agentId)}`;
@@ -52,6 +68,8 @@ export class VoiceSession {
   private mic: MicCapture | null = null;
   private playback: PlaybackQueue | null = null;
   private status: SessionStatus = "idle";
+  // While `Date.now() < duckUntil` the user is (recently) speaking: the agent is muted.
+  private duckUntil = 0;
 
   constructor(
     private readonly agentId: string,
@@ -67,6 +85,12 @@ export class VoiceSession {
     try {
       this.mic = await createMic((frame) => {
         if (this.ws && this.ws.readyState === WS_OPEN) this.ws.send(frame);
+        // Barge-in: the user is talking — silence the agent immediately and keep it
+        // muted for the hangover window (see handleMessage, which drops agent audio).
+        if (hasSpeech(frame)) {
+          this.duckUntil = Date.now() + DUCK_HANGOVER_MS;
+          this.playback?.flush();
+        }
       });
     } catch {
       this.setStatus("error");
@@ -132,6 +156,9 @@ export class VoiceSession {
           break;
       }
     } else if (event.data instanceof ArrayBuffer) {
+      // Barge-in: while the user is (recently) speaking, drop agent audio so a muted
+      // agent doesn't resume from buffered frames.
+      if (Date.now() < this.duckUntil) return;
       this.playback?.push(event.data);
     }
   }

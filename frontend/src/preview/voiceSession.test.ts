@@ -56,6 +56,7 @@ function setup() {
   let playbackStopped = false;
   const playback: PlaybackQueue = {
     push: (buf) => pushed.push(buf),
+    flush: () => {},
     stop: () => { playbackStopped = true; },
   };
   let micStopped = false;
