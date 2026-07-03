@@ -12,6 +12,7 @@ export function LiveCallView() {
   const liveEvents = useDashboardStore((s) => s.liveEvents);
   const pending = useDashboardStore((s) => s.pending);
   const escalate = useDashboardStore((s) => s.escalateCall);
+  const escalateAvailable = useDashboardStore((s) => s.escalateAvailable);
 
   if (!callId) {
     return <p className="p-6 text-sm text-muted">No call selected.</p>;
@@ -54,7 +55,10 @@ export function LiveCallView() {
           testid="escalate"
           danger
           pending={pending[`escalate:${callId}`]}
-          disabled={ended || escalated}
+          disabled={ended || escalated || !escalateAvailable}
+          title={
+            escalateAvailable ? undefined : "Not available in this build"
+          }
           onClick={() => escalate(callId)}
         >
           ↗ Escalate to human

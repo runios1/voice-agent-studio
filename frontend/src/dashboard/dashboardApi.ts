@@ -10,12 +10,21 @@
  * that replays fixtures. The dashboard owns NO control logic — it renders server
  * truth and issues control calls (D-security: the server gate is the boundary).
  *
- * ⚠ The control endpoints below are P2-2's and are NOT yet in the frozen
- * contracts/api. Paths here are the dashboard's assumed shape; the integrator must
- * reconcile them with P2-2's real routes (see DONE.md). Everything is mocked until
- * then.
+ * The real HTTP impl binds to contracts/dashboard_http/README.md (the FROZEN v1
+ * seam onto the already-merged orchestrator control API + event backbone). Notable
+ * adaptations pinned there: campaign detail is TWO reads composed client-side;
+ * events arrive WRAPPED as `{ seq, event }` rows and are unwrapped to `Event`;
+ * emergency-stop is the tenant-global `POST /emergency-stop`; and escalate is
+ * DEFERRED in v1 (no route) so the real impl reports it unavailable (§3).
  */
-import type { AuditFilter, Campaign, CampaignDetail, Event } from "./types";
+import type {
+  AuditFilter,
+  Campaign,
+  CampaignDetail,
+  Event,
+  EventRow,
+  Lead,
+} from "./types";
 import { parseSseStream, type RawSseEvent } from "../api/sse";
 
 export class ControlFailure extends Error {
@@ -51,10 +60,17 @@ export interface DashboardApi {
   pauseCampaign(id: string): Promise<void>;
   /** POST /campaigns/{id}/resume — resume a paused campaign. */
   resumeCampaign(id: string): Promise<void>;
-  /** POST /control/emergency-stop — global stop across every campaign. */
+  /** POST /emergency-stop — tenant-global stop across every running campaign. */
   emergencyStopAll(): Promise<void>;
-  /** POST /calls/{id}/escalate — warm-transfer a live call to a human (P2-D6). */
+  /** Warm-transfer a live call to a human (P2-D6). DEFERRED in v1: there is no HTTP
+   *  route yet (contract §3), so the real impl surfaces `escalateAvailable=false`
+   *  and this rejects rather than calling a non-existent route. */
   escalateCall(callId: string): Promise<void>;
+
+  /** Whether live-call escalation is wired in this build. `false` (real HTTP, v1)
+   *  tells the UI to disable/hide the control; `undefined`/`true` (mock/dev) leaves
+   *  it enabled. Escalation is a voice-runtime action, not part of the v1 seam. */
+  readonly escalateAvailable?: boolean;
 }
 
 // --------------------------------------------------------------------------- //
@@ -82,10 +98,22 @@ export function createHttpDashboardApi(baseUrl = "/api"): DashboardApi {
   return {
     listCampaigns: () => getJson<Campaign[]>("/campaigns"),
 
-    getCampaign: (id) =>
-      getJson<CampaignDetail>(`/campaigns/${encodeURIComponent(id)}`),
+    // Campaign detail is TWO reads (contract §1): the campaign and its leads are
+    // separate routes, composed into CampaignDetail here.
+    async getCampaign(id): Promise<CampaignDetail> {
+      const enc = encodeURIComponent(id);
+      const [campaign, leads] = await Promise.all([
+        getJson<Campaign>(`/campaigns/${enc}`),
+        getJson<Lead[]>(`/campaigns/${enc}/leads`),
+      ]);
+      return { campaign, leads };
+    },
 
-    queryAudit: (filter) => getJson<Event[]>(`/events?${filterToQuery(filter)}`),
+    // GET /events returns WRAPPED rows (`{ seq, event }`); unwrap to Event[] (§2).
+    async queryAudit(filter): Promise<Event[]> {
+      const rows = await getJson<EventRow[]>(`/events?${filterToQuery(filter)}`);
+      return rows.map((r) => r.event);
+    },
 
     async *subscribeEvents(filter, signal) {
       const res = await fetch(`${baseUrl}/events/stream?${filterToQuery(filter)}`, {
@@ -102,25 +130,36 @@ export function createHttpDashboardApi(baseUrl = "/api"): DashboardApi {
 
     pauseCampaign: (id) => post(`/campaigns/${encodeURIComponent(id)}/pause`),
     resumeCampaign: (id) => post(`/campaigns/${encodeURIComponent(id)}/resume`),
-    emergencyStopAll: () => post("/control/emergency-stop"),
-    escalateCall: (callId) => post(`/calls/${encodeURIComponent(callId)}/escalate`),
+    // Tenant-global, NOT per-campaign and NOT /control/emergency-stop (§1).
+    emergencyStopAll: () => post("/emergency-stop"),
+    // Escalate is deferred in v1 (§3): no route exists. Reject without a fetch so
+    // we never call a non-existent endpoint; the UI keeps the control disabled.
+    escalateCall: async (_callId) => {
+      throw new ControlFailure("Escalation isn't available in this build.", 501);
+    },
+    escalateAvailable: false,
   };
 }
 
-/** The stream server may wrap events as `event: <type>\ndata: <Event JSON>`, or send
- *  a bare JSON `Event`. Accept both; a record must carry a parsed Event object. */
+/** Unwrap an SSE frame into an `Event`. The event backbone wraps each frame's
+ *  `data` as a durable-log row `{ seq, event }` (contract §2); read `data.event`.
+ *  A bare `Event` in `data` is also tolerated (mock/legacy). Non-event frames
+ *  (keep-alive, pings) yield null. */
 export function rawToEvent(raw: RawSseEvent): Event | null {
   const d = raw.data;
-  if (d && typeof d === "object" && "event_id" in d && "type" in d) {
-    return d as Event;
+  if (!d || typeof d !== "object") return null;
+  const inner = "event" in d ? (d as { event?: unknown }).event : d;
+  if (inner && typeof inner === "object" && "event_id" in inner && "type" in inner) {
+    return inner as Event;
   }
   return null;
 }
 
 export function filterToQuery(filter: AuditFilter): string {
   const q = new URLSearchParams();
-  if (filter.types?.length) q.set("types", filter.types.join(","));
-  if (filter.severity) q.set("severity", filter.severity);
+  // Repeatable params: one `type=`/`severity=` per value, NOT a comma-joined list (§2).
+  for (const t of filter.types ?? []) q.append("type", t);
+  if (filter.severity) q.append("severity", filter.severity);
   if (filter.campaign_id) q.set("campaign_id", filter.campaign_id);
   if (filter.since) q.set("since", filter.since);
   if (filter.until) q.set("until", filter.until);

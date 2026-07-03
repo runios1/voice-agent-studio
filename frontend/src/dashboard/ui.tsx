@@ -79,6 +79,7 @@ export function ControlButton({
   danger,
   children,
   testid,
+  title,
 }: {
   onClick: () => void;
   pending?: boolean;
@@ -86,10 +87,12 @@ export function ControlButton({
   danger?: boolean;
   children: React.ReactNode;
   testid?: string;
+  title?: string;
 }) {
   return (
     <button
       data-testid={testid}
+      title={title}
       onClick={onClick}
       disabled={disabled || pending}
       className={clsx(

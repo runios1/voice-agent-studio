@@ -48,6 +48,11 @@ export interface DashboardState {
   pending: Record<string, boolean>;
   controlError: string | null;
 
+  /** whether live-call escalation is wired in this build (false in real v1 mode,
+   *  where there is no escalate route — the control is disabled). Set from the api
+   *  at init; defaults true so mock/dev keep it enabled. */
+  escalateAvailable: boolean;
+
   // actions
   init: (api: DashboardApi) => void;
   loadFleet: () => Promise<void>;
@@ -117,8 +122,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => {
 
     pending: {},
     controlError: null,
+    escalateAvailable: true,
 
-    init: (api) => set({ api }),
+    init: (api) => set({ api, escalateAvailable: api.escalateAvailable !== false }),
 
     loadFleet: async () => {
       const api = get().api;

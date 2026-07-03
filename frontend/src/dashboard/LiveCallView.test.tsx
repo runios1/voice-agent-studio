@@ -51,4 +51,18 @@ describe("LiveCallView", () => {
     channel.push(makeEvent({ type: "call.ended", call_id: "call-1" }));
     await waitFor(() => expect(screen.getByTestId("escalate")).toBeDisabled());
   });
+
+  it("disables Escalate when the api reports it unavailable (real v1 mode, §3)", async () => {
+    const { channel } = await selectCall("call-1");
+    // Real-mode escalate is deferred: no route, so the control stays disabled.
+    useDashboardStore.setState({ escalateAvailable: false });
+    render(<LiveCallView />);
+    channel.push(makeEvent({ type: "call.started", call_id: "call-1" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("call-status")).toHaveTextContent("in call"),
+    );
+    const btn = screen.getByTestId("escalate");
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("title", "Not available in this build");
+  });
 });
