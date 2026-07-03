@@ -163,6 +163,7 @@ export function resetStore() {
     auditLoading: false,
     pending: {},
     controlError: null,
+    escalateAvailable: true,
   });
 }
 

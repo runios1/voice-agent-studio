@@ -101,10 +101,23 @@ export interface Campaign {
   autopause_reason?: string | null;
 }
 
-/** A campaign plus its leads — the drill-down read (GET /campaigns/{id}). */
+/** A campaign plus its leads — the drill-down read, composed client-side from the
+ *  two backend reads (GET /campaigns/{id} + GET /campaigns/{id}/leads). */
 export interface CampaignDetail {
   campaign: Campaign;
   leads: Lead[];
+}
+
+// --------------------------------------------------------------------------- //
+// Event backbone wire shape (events/router.py)
+// --------------------------------------------------------------------------- //
+/** How the event backbone wraps every event on the wire: the durable-log row is
+ *  `{ seq, event }`, never a bare Event. `GET /events` returns `EventRow[]`; each
+ *  `/events/stream` SSE frame carries one `EventRow` in its `data`. The frontend
+ *  unwraps to `row.event` before handing `Event`s to the store/views. */
+export interface EventRow {
+  seq: number;
+  event: Event;
 }
 
 // --------------------------------------------------------------------------- //
