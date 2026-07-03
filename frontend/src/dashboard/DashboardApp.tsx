@@ -11,10 +11,19 @@ import type { DashboardApi } from "./dashboardApi";
 import { useDashboardStore } from "./store";
 import { FleetView } from "./FleetView";
 import { CampaignView } from "./CampaignView";
+import { CampaignBuilder } from "./CampaignBuilder";
 import { LiveCallView } from "./LiveCallView";
 import { AuditView } from "./AuditView";
+import { ConnectionsView } from "../connections/ConnectionsView";
+import type { ConnectionsApi } from "../connections/connectionsApi";
 
-export function DashboardApp({ api }: { api: DashboardApi }) {
+export function DashboardApp({
+  api,
+  connectionsApi,
+}: {
+  api: DashboardApi;
+  connectionsApi: ConnectionsApi;
+}) {
   const init = useDashboardStore((s) => s.init);
   const loadFleet = useDashboardStore((s) => s.loadFleet);
   const startStream = useDashboardStore((s) => s.startStream);
@@ -29,6 +38,7 @@ export function DashboardApp({ api }: { api: DashboardApi }) {
   const openFleet = useDashboardStore((s) => s.openFleet);
   const openCampaign = useDashboardStore((s) => s.openCampaign);
   const openAudit = useDashboardStore((s) => s.openAudit);
+  const openConnections = useDashboardStore((s) => s.openConnections);
 
   useEffect(() => {
     init(api);
@@ -37,7 +47,8 @@ export function DashboardApp({ api }: { api: DashboardApi }) {
     return () => stopStream();
   }, [api, init, loadFleet, startStream, stopStream]);
 
-  const onFleetSide = view !== "audit";
+  const onFleetSide =
+    view === "fleet" || view === "campaign" || view === "live-call" || view === "new-campaign";
 
   return (
     <div className="flex h-full flex-col">
@@ -46,6 +57,9 @@ export function DashboardApp({ api }: { api: DashboardApi }) {
         <nav className="flex gap-1">
           <TabButton active={onFleetSide} onClick={openFleet}>
             Fleet
+          </TabButton>
+          <TabButton active={view === "connections"} onClick={openConnections}>
+            Connections
           </TabButton>
           <TabButton active={view === "audit"} onClick={openAudit}>
             Audit
@@ -102,9 +116,11 @@ export function DashboardApp({ api }: { api: DashboardApi }) {
 
       <main className="min-h-0 flex-1">
         {view === "fleet" && <FleetView />}
+        {view === "new-campaign" && <CampaignBuilder />}
         {view === "campaign" && <CampaignView />}
         {view === "live-call" && <LiveCallView />}
         {view === "audit" && <AuditView />}
+        {view === "connections" && <ConnectionsView api={connectionsApi} />}
       </main>
     </div>
   );

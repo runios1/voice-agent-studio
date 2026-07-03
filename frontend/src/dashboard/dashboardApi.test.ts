@@ -154,4 +154,38 @@ describe("createHttpDashboardApi", () => {
       status: 409,
     });
   });
+
+  it("listAgents GETs /agents (api_contract.md, meta-only)", async () => {
+    let path = "";
+    stubFetch((url) => {
+      path = url;
+      return jsonResponse([{ id: "agent-demo", name: "Acme SDR", status: "ready" }]);
+    });
+    const agents = await createHttpDashboardApi().listAgents();
+    expect(path).toBe("/api/agents");
+    expect(agents).toEqual([{ id: "agent-demo", name: "Acme SDR", status: "ready" }]);
+  });
+
+  it("createCampaign POSTs the body to /campaigns and returns the Campaign", async () => {
+    const campaign = makeCampaign({ id: "camp-9", name: "New one" });
+    let method = "";
+    let path = "";
+    let body: unknown = null;
+    stubFetch((url, init) => {
+      method = init?.method ?? "GET";
+      path = url;
+      body = init?.body ? JSON.parse(String(init.body)) : null;
+      return jsonResponse(campaign);
+    });
+    const input = {
+      agent_id: "agent-demo",
+      name: "New one",
+      leads: [{ phone: "+15550001111", display_name: "Ada" }],
+    };
+    const result = await createHttpDashboardApi().createCampaign(input);
+    expect(method).toBe("POST");
+    expect(path).toBe("/api/campaigns");
+    expect(body).toEqual(input);
+    expect(result.id).toBe("camp-9");
+  });
 });

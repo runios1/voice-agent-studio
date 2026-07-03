@@ -18,9 +18,11 @@
  * DEFERRED in v1 (no route) so the real impl reports it unavailable (§3).
  */
 import type {
+  AgentSummary,
   AuditFilter,
   Campaign,
   CampaignDetail,
+  CreateCampaignInput,
   Event,
   EventRow,
   Lead,
@@ -42,6 +44,15 @@ export interface DashboardApi {
 
   /** GET /campaigns/{id} — a campaign plus its per-lead states (drill-down). */
   getCampaign(id: string): Promise<CampaignDetail>;
+
+  /** GET /agents — meta-only list, for the campaign builder's agent picker
+   *  (api_contract.md; same door the Phase-1 studio uses). */
+  listAgents(): Promise<AgentSummary[]>;
+
+  /** POST /campaigns — authorize a new campaign (control_api.py). Authorizing
+   *  IS creating: bounded autonomy means this immediately starts the dispatch
+   *  loop, so the builder UI treats it as the deliberate, one-way step. */
+  createCampaign(input: CreateCampaignInput): Promise<Campaign>;
 
   /** GET /events — a filtered slice of the immutable log (audit view). Filtering is
    *  server-side (authoritative); the client just passes the filter through. */
@@ -95,8 +106,23 @@ export function createHttpDashboardApi(baseUrl = "/api"): DashboardApi {
     if (!res.ok) throw await toFailure(res);
   }
 
+  async function postJson<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await toFailure(res);
+    return (await res.json()) as T;
+  }
+
   return {
     listCampaigns: () => getJson<Campaign[]>("/campaigns"),
+
+    listAgents: () => getJson<AgentSummary[]>("/agents"),
+
+    createCampaign: (input) => postJson<Campaign>("/campaigns", input),
 
     // Campaign detail is TWO reads (contract §1): the campaign and its leads are
     // separate routes, composed into CampaignDetail here.

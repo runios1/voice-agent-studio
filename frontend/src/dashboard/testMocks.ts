@@ -6,7 +6,14 @@
  * UI). Tests import this, not mockDashboardApi.ts (that's dev scaffolding).
  */
 import type { DashboardApi } from "./dashboardApi";
-import type { Campaign, CampaignDetail, Event, Lead } from "./types";
+import type {
+  AgentSummary,
+  Campaign,
+  CampaignDetail,
+  CreateCampaignInput,
+  Event,
+  Lead,
+} from "./types";
 import { useDashboardStore } from "./store";
 
 /** A push-driven async channel of events for subscribeEvents. */
@@ -46,6 +53,7 @@ export interface Calls {
   emergencyStop: number;
   escalate: string[];
   audit: number;
+  createCampaign: CreateCampaignInput[];
 }
 
 interface Opts {
@@ -55,6 +63,13 @@ interface Opts {
   channel?: ReturnType<typeof makeEventChannel>;
   /** if true, control calls push a reflecting event onto the channel. */
   reflect?: boolean;
+  agents?: AgentSummary[];
+  /** override createCampaign's behavior, e.g. to simulate a server rejection. */
+  createCampaign?: (input: CreateCampaignInput) => Promise<Campaign>;
+}
+
+export function makeAgentSummary(over: Partial<AgentSummary> = {}): AgentSummary {
+  return { id: "agent-demo", name: "Acme SDR", status: "ready", ...over };
 }
 
 export function makeCampaign(over: Partial<Campaign> = {}): Campaign {
@@ -109,10 +124,40 @@ export function fakeApi(opts: Opts = {}): { api: DashboardApi; calls: Calls; cha
   const channel = opts.channel ?? makeEventChannel();
   const campaigns = opts.campaigns ?? [makeCampaign()];
   const leads = opts.leads ?? {};
-  const calls: Calls = { pause: [], resume: [], emergencyStop: 0, escalate: [], audit: 0 };
+  const agents = opts.agents ?? [makeAgentSummary()];
+  const calls: Calls = {
+    pause: [],
+    resume: [],
+    emergencyStop: 0,
+    escalate: [],
+    audit: 0,
+    createCampaign: [],
+  };
 
   const api: DashboardApi = {
     listCampaigns: async () => campaigns.map((c) => ({ ...c })),
+    listAgents: async () => agents.map((a) => ({ ...a })),
+    createCampaign: async (input) => {
+      calls.createCampaign.push(input);
+      if (opts.createCampaign) return opts.createCampaign(input);
+      const campaign = makeCampaign({
+        id: `camp-${campaigns.length + 1}`,
+        agent_id: input.agent_id,
+        name: input.name,
+        state: "running",
+        ...(input.envelope ? { envelope: input.envelope } : {}),
+      });
+      campaigns.push(campaign);
+      leads[campaign.id] = input.leads.map((l, i) =>
+        makeLead({
+          id: `${campaign.id}-lead-${i}`,
+          campaign_id: campaign.id,
+          phone: l.phone,
+          display_name: l.display_name ?? null,
+        }),
+      );
+      return { ...campaign };
+    },
     getCampaign: async (id): Promise<CampaignDetail> => {
       const campaign = campaigns.find((c) => c.id === id) ?? makeCampaign({ id });
       return { campaign: { ...campaign }, leads: (leads[id] ?? []).map((l) => ({ ...l })) };

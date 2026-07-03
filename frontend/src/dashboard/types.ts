@@ -132,3 +132,32 @@ export interface AuditFilter {
   until?: string;
   limit?: number;
 }
+
+// --------------------------------------------------------------------------- //
+// config_schema/schema.py AgentMeta (meta-only reflection, for the campaign
+// builder's agent picker — GET /agents, api_contract.md)
+// --------------------------------------------------------------------------- //
+export type AgentStatus = "draft" | "ready";
+
+export interface AgentSummary {
+  id: string;
+  name: string;
+  status: AgentStatus;
+}
+
+// --------------------------------------------------------------------------- //
+// Campaign creation (campaign builder -> POST /campaigns, control_api.py
+// AuthorizeBody). Authorizing IS creating in this API — there is no separate
+// draft step (P2-2).
+// --------------------------------------------------------------------------- //
+export interface NewLead {
+  phone: string;
+  display_name?: string;
+}
+
+export interface CreateCampaignInput {
+  agent_id: string;
+  name: string;
+  leads: NewLead[];
+  envelope?: GuardrailEnvelope;
+}

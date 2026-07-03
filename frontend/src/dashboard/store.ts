@@ -25,7 +25,13 @@ import { applyLifecycle, CAMPAIGN_LIFECYCLE_TYPES } from "./metrics";
 
 const MAX_LIVE_EVENTS = 1000;
 
-export type DashboardView = "fleet" | "campaign" | "live-call" | "audit";
+export type DashboardView =
+  | "fleet"
+  | "campaign"
+  | "live-call"
+  | "audit"
+  | "new-campaign"
+  | "connections";
 
 export interface DashboardState {
   api: DashboardApi | null;
@@ -64,6 +70,8 @@ export interface DashboardState {
   openCampaign: (id: string) => Promise<void>;
   openCall: (callId: string) => void;
   openAudit: () => void;
+  openNewCampaign: () => void;
+  openConnections: () => void;
 
   setAuditFilter: (filter: AuditFilter) => void;
   runAudit: () => Promise<void>;
@@ -192,6 +200,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => {
 
     openFleet: () =>
       set({ view: "fleet", selectedCampaignId: null, selectedCallId: null }),
+
+    openNewCampaign: () =>
+      set({ view: "new-campaign", selectedCampaignId: null, selectedCallId: null }),
+
+    openConnections: () =>
+      set({ view: "connections", selectedCampaignId: null, selectedCallId: null }),
 
     openCampaign: async (id) => {
       const api = get().api;

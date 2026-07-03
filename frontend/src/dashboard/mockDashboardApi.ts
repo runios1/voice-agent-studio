@@ -11,9 +11,11 @@
  */
 import type { DashboardApi } from "./dashboardApi";
 import type {
+  AgentSummary,
   AuditFilter,
   Campaign,
   CampaignDetail,
+  CreateCampaignInput,
   Event,
   EventType,
   Lead,
@@ -83,6 +85,11 @@ export function createMockDashboardApi(): DashboardApi {
     "camp-3": makeLeads("camp-3", 20),
   };
 
+  const agents: AgentSummary[] = [
+    { id: "agent-demo", name: "Acme SDR", status: "ready" },
+    { id: "agent-draft", name: "Still-building SDR", status: "draft" },
+  ];
+
   const auditLog: Event[] = [];
   const listeners = new Set<(e: Event) => void>();
 
@@ -143,8 +150,34 @@ export function createMockDashboardApi(): DashboardApi {
     }, 2500);
   }
 
+  let campaignSeq = campaigns.length;
+
   return {
     listCampaigns: async () => campaigns.map((c) => ({ ...c })),
+
+    listAgents: async () => agents.map((a) => ({ ...a })),
+
+    createCampaign: async (input: CreateCampaignInput): Promise<Campaign> => {
+      const id = `camp-${++campaignSeq}`;
+      const campaign = makeCampaign(id, input.name, "running");
+      campaign.agent_id = input.agent_id;
+      if (input.envelope) campaign.envelope = input.envelope;
+      campaigns.push(campaign);
+      leads[id] = input.leads.map((l, i) => ({
+        id: `${id}-lead-${i}`,
+        campaign_id: id,
+        tenant_id: "tenant-demo",
+        phone: l.phone,
+        display_name: l.display_name ?? null,
+        state: "queued",
+        attempts: 0,
+        next_action_at: null,
+        outcome: null,
+        last_call_id: null,
+      }));
+      emit("campaign.started", { campaign_id: id });
+      return { ...campaign };
+    },
 
     getCampaign: async (id): Promise<CampaignDetail> => {
       const campaign = campaigns.find((c) => c.id === id);

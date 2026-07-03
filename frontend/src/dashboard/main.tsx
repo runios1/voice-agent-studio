@@ -11,14 +11,20 @@ import "../index.css";
 import { DashboardApp } from "./DashboardApp";
 import { createHttpDashboardApi, type DashboardApi } from "./dashboardApi";
 import { createMockDashboardApi } from "./mockDashboardApi";
+import { createHttpConnectionsApi } from "../connections/connectionsApi";
+import type { ConnectionsApi } from "../connections/connectionsApi";
+import { createMockConnectionsApi } from "../connections/mockConnectionsApi";
 
 const useMock = import.meta.env.VITE_USE_MOCK !== "false";
 const api: DashboardApi = useMock
   ? createMockDashboardApi()
   : createHttpDashboardApi();
+const connectionsApi: ConnectionsApi = useMock
+  ? createMockConnectionsApi()
+  : createHttpConnectionsApi();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <DashboardApp api={api} />
+    <DashboardApp api={api} connectionsApi={connectionsApi} />
   </StrictMode>,
 );

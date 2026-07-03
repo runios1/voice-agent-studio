@@ -10,6 +10,7 @@ export function FleetView() {
   const liveEvents = useDashboardStore((s) => s.liveEvents);
   const pending = useDashboardStore((s) => s.pending);
   const openCampaign = useDashboardStore((s) => s.openCampaign);
+  const openNewCampaign = useDashboardStore((s) => s.openNewCampaign);
   const pause = useDashboardStore((s) => s.pauseCampaign);
   const resume = useDashboardStore((s) => s.resumeCampaign);
   const emergencyStop = useDashboardStore((s) => s.emergencyStopAll);
@@ -20,15 +21,20 @@ export function FleetView() {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-line px-5 py-3">
         <h2 className="text-sm font-semibold">Fleet</h2>
-        <ControlButton
-          testid="emergency-stop"
-          danger
-          pending={pending["emergency-stop"]}
-          disabled={!anyRunning}
-          onClick={emergencyStop}
-        >
-          ⛔ Emergency stop all
-        </ControlButton>
+        <div className="flex items-center gap-2">
+          <ControlButton testid="new-campaign" onClick={openNewCampaign}>
+            + New campaign
+          </ControlButton>
+          <ControlButton
+            testid="emergency-stop"
+            danger
+            pending={pending["emergency-stop"]}
+            disabled={!anyRunning}
+            onClick={emergencyStop}
+          >
+            ⛔ Emergency stop all
+          </ControlButton>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-5 py-3">
