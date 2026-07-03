@@ -101,33 +101,46 @@ class GeminiLiveConnection:
         return self._read_loop()
 
     async def _read_loop(self) -> AsyncIterator[LiveEvent]:  # pragma: no cover - live smoke
-        async for msg in self._session.receive():
-            sc = getattr(msg, "server_content", None)
-            tc = getattr(msg, "tool_call", None)
-            if sc is not None:
-                audio = None
-                model_turn = getattr(sc, "model_turn", None)
-                if model_turn is not None:
-                    for part in model_turn.parts or []:
-                        inline = getattr(part, "inline_data", None)
-                        if inline is not None and inline.data:
-                            audio = inline.data
-                out_tr = getattr(sc, "output_transcription", None)
-                in_tr = getattr(sc, "input_transcription", None)
-                yield LiveEvent(
-                    audio=audio,
-                    output_transcript_delta=getattr(out_tr, "text", None) if out_tr else None,
-                    input_transcript_delta=getattr(in_tr, "text", None) if in_tr else None,
-                    turn_complete=bool(getattr(sc, "turn_complete", False)),
-                    interrupted=bool(getattr(sc, "interrupted", False)),
-                )
-            if tc is not None:
-                calls = [
-                    LiveFunctionCall(id=fc.id, name=fc.name, args=dict(fc.args or {}))
-                    for fc in (tc.function_calls or [])
-                ]
-                if calls:
-                    yield LiveEvent(function_calls=calls)
+        # `session.receive()` yields exactly ONE model turn then stops (it breaks on
+        # turn_complete). Loop it so the conversation continues past the agent's opening
+        # turn — without this the call ends after turn one and the mic pump is torn down,
+        # so nothing ever hears the caller. The loop ends when the Live socket closes
+        # (receive() yields nothing / raises), which winds the call down normally.
+        while True:
+            produced = False
+            try:
+                async for msg in self._session.receive():
+                    produced = True
+                    sc = getattr(msg, "server_content", None)
+                    tc = getattr(msg, "tool_call", None)
+                    if sc is not None:
+                        audio = None
+                        model_turn = getattr(sc, "model_turn", None)
+                        if model_turn is not None:
+                            for part in model_turn.parts or []:
+                                inline = getattr(part, "inline_data", None)
+                                if inline is not None and inline.data:
+                                    audio = inline.data
+                        out_tr = getattr(sc, "output_transcription", None)
+                        in_tr = getattr(sc, "input_transcription", None)
+                        yield LiveEvent(
+                            audio=audio,
+                            output_transcript_delta=getattr(out_tr, "text", None) if out_tr else None,
+                            input_transcript_delta=getattr(in_tr, "text", None) if in_tr else None,
+                            turn_complete=bool(getattr(sc, "turn_complete", False)),
+                            interrupted=bool(getattr(sc, "interrupted", False)),
+                        )
+                    if tc is not None:
+                        calls = [
+                            LiveFunctionCall(id=fc.id, name=fc.name, args=dict(fc.args or {}))
+                            for fc in (tc.function_calls or [])
+                        ]
+                        if calls:
+                            yield LiveEvent(function_calls=calls)
+            except Exception:
+                return  # Live socket closed/errored — end the stream; the call winds down
+            if not produced:
+                return  # receive() returned nothing -> session closed
 
 
 class _LiveConnectionCM:
