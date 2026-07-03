@@ -1,4 +1,6 @@
 # P2-6 — auto-pause / escalation engine
-pydantic>=2.0    # the frozen event contract (contracts/events) is pydantic v2
-# Dev/CI only:
-pytest>=7.0
+#
+# P3-7 reconciled these into the root requirements.txt. Runtime dep: pydantic
+# (the frozen event contract, contracts/events, is pydantic v2). Dev/CI: pytest.
+#
+# From the repo root: pip install -r requirements.txt

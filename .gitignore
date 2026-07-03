@@ -15,6 +15,7 @@ build/
 # Env & secrets — NEVER commit. Also never let these reach a model context.
 .env
 .env.*
+!.env.example
 *.key
 credentials.json
 service-account*.json

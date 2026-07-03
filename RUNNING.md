@@ -15,13 +15,25 @@ integration assembly). The frontend talks to it through the Vite `/api` proxy.
 > cd frontend && VITE_USE_MOCK=false npm run dev
 > ```
 
+## Setup from a clean checkout
+```bash
+pip install -r requirements.txt
+cp .env.example .env    # then fill in GEMINI_API_KEY
+cd frontend && npm install && cd ..
+```
+`.env.example` documents every key the backend reads. Only `GEMINI_API_KEY` (or
+`GOOGLE_API_KEY`) is required to boot — everything else (Postgres persistence,
+Model Armor screening, Google Calendar, Resend, Retell) gates one optional real
+integration and falls back to an in-memory/mock implementation when unset, so
+this same checkout boots and runs a full campaign end-to-end with just the one key.
+
 ## Prerequisites
 - A Gemini API key in `.env` at the repo root (gitignored):
   ```
   GEMINI_API_KEY=...
   ```
   Nothing auto-loads it — source it into the shell before launching the backend.
-- Python deps: `fastapi`, `uvicorn[standard]`, `google-genai` (WS6), `pydantic`.
+- Python deps: `pip install -r requirements.txt` (one root file for the whole repo).
 - Frontend deps: `cd frontend && npm install`.
 
 ## Start the backend (:8000)
