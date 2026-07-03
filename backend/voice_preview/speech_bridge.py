@@ -77,25 +77,34 @@ class ScriptedSpeechBridge:
 
 
 class GeminiLiveSpeechBridge:
-    """The real bridge: Gemini 3.1 Flash Live for streaming STT (lead audio -> text)
-    and TTS (agent text -> audio). Two separate Live sessions on purpose — STT must
-    NOT let the model also generate a conversational reply (that's the engine's job
-    over `ModelWrapper`; letting Live's own turn also "answer" would double-speak and
-    is exactly the drift the wire contract forbids), so the STT session pins
-    `response_modalities=["TEXT"]` with `input_audio_transcription` and never sends
-    the transcript back as a prompt; the TTS session is a one-shot `AUDIO` turn per
-    agent utterance.
+    """The real bridge, using the RIGHT Google product for each half:
 
-    This is the documented live-smoke-test seam (mirrors `RetellTransport`): CI drives
-    `BrowserVoiceTransport` against `ScriptedSpeechBridge` only. `start()` is where the
-    `google.genai` SDK is imported — lazily, so a key-less/SDK-less checkout never
-    touches it (D8)."""
+      * STT (lead audio -> text): a Gemini Live session with `input_audio_transcription`.
+        A background reader accumulates the transcription and enqueues a finalized
+        utterance per turn (Live's own audio turn is ignored — it does NOT author the
+        reply). Live is the audio-in transcriber here, nothing more.
+      * TTS (agent text -> audio): the DEDICATED text-to-speech model, which reads the
+        text verbatim. Live is conversational — asked to "speak" a line it would REPLY
+        to it instead — so it is the wrong tool for output and is not used for TTS.
+
+    The point of splitting it this way: the spoken reply is authored by the CallEngine
+    over `ModelWrapper`, so the code-emitted AI disclosure and in-code tool guardrails
+    are never bypassed (CLAUDE.md §5). The bridge only ears (STT) and mouth (TTS).
+
+    Live-smoke seam (mirrors `RetellTransport`): CI drives `BrowserVoiceTransport`
+    against `ScriptedSpeechBridge`; the `google.genai` SDK is imported lazily in
+    `start()` so a key-less/SDK-less checkout never touches it (D8)."""
 
     def __init__(self, *, api_key: str, model: Optional[str] = None) -> None:
         self._api_key = api_key
         self._model = model or os.getenv(
             "GEMINI_MODEL_VOICE_LIVE", "gemini-3.1-flash-live-preview"
         )
+        # TTS is a SEPARATE product from Live: Live is conversational (it would REPLY to
+        # the agent's line, not read it), so the spoken output uses the dedicated
+        # text-to-speech model, which reads text verbatim.
+        self._tts_model = os.getenv("GEMINI_MODEL_TTS", "gemini-2.5-flash-preview-tts")
+        self._voice = os.getenv("GEMINI_TTS_VOICE", "Kore")
         self._client = None
         self._stt_cm = None
         self._stt_session = None
@@ -170,23 +179,29 @@ class GeminiLiveSpeechBridge:
             return None
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:  # pragma: no cover
+        """Read `text` aloud with the dedicated TTS model — NOT Live. Live is
+        conversational and would answer the line instead of speaking it; the TTS model
+        reads it verbatim, returning 24 kHz PCM. Non-streaming, so we synthesize the
+        whole (short SDR) utterance then hand it out in frames for gapless playback."""
         types = self._types
-        async with self._client.aio.live.connect(
-            model=self._model,
-            config=types.LiveConnectConfig(response_modalities=["AUDIO"]),
-        ) as session:
-            await session.send_client_content(
-                turns=types.Content(role="user", parts=[types.Part(text=text)]),
-                turn_complete=True,
-            )
-            async for response in session.receive():
-                model_turn = getattr(response.server_content, "model_turn", None)
-                if not model_turn:
-                    continue
-                for part in model_turn.parts:
-                    data = getattr(getattr(part, "inline_data", None), "data", None)
-                    if data:
-                        yield data
+        response = await self._client.aio.models.generate_content(
+            model=self._tts_model,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=self._voice
+                        )
+                    )
+                ),
+            ),
+        )
+        data = response.candidates[0].content.parts[0].inline_data.data
+        frame = 4096
+        for i in range(0, len(data), frame):
+            yield data[i : i + frame]
 
     async def close(self) -> None:  # pragma: no cover
         if self._reader is not None:
