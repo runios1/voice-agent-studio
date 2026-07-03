@@ -38,6 +38,7 @@ alongside the phone bridge (P4-6). Not silently worked around: simply not attemp
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -87,6 +88,14 @@ OPENING_TRIGGER = (
     "with your required disclosure first, exactly as instructed, then your brief "
     "opening.)"
 )
+
+log = logging.getLogger("voice_agent_studio.live_agent.session")
+
+# Browser mic frames arrive tiny (~85 bytes / ~2.7 ms each — ~375/sec). Batch them to
+# ~100 ms before handing to Live: far fewer awaits, and a chunk granularity the model's
+# VAD/ASR handles cleanly (a firehose of micro-frames transcribes unreliably). 3200 bytes
+# = 100 ms of 16 kHz mono s16le.
+_MIC_BATCH_BYTES = 3200
 
 # Minimum share of the disclosure's words that must appear in the opening turn for it
 # to count as delivered — tolerant of Live phrasing it naturally, strict enough to
@@ -251,10 +260,18 @@ class GeminiLiveAgentSession:
     async def _pump_mic(
         self, transport: AudioTransport, conn: LiveConnection, state: _CallState
     ) -> None:
+        buf = bytearray()
+        batches = 0
         async for chunk in transport.recv_audio():
             if state.ended:
                 return
-            await conn.send_audio(chunk)
+            buf.extend(chunk)
+            if len(buf) >= _MIC_BATCH_BYTES:
+                await conn.send_audio(bytes(buf))
+                buf.clear()
+                batches += 1
+                if batches % 20 == 0:  # ~every 2s of streamed audio
+                    log.info("live: mic → Live, ~%d ms streamed", batches * 100)
 
     async def _pump_live(
         self,
@@ -275,9 +292,12 @@ class GeminiLiveAgentSession:
 
             # A: barge-in is Live's call, never ours — we only relay its native signal.
             if event.interrupted:
+                log.info("live: barge-in (Live detected the user speaking)")
                 await transport.cut_playback()
 
             if event.input_transcript_delta:
+                if not state.lead_spoke:
+                    log.info("live: Live is transcribing the user (input audio understood)")
                 state.lead_spoke = True
                 state.input_text += event.input_transcript_delta
                 if detect_opt_out(state.input_text):
@@ -286,6 +306,7 @@ class GeminiLiveAgentSession:
 
             if event.output_transcript_delta:
                 if not state.turn_has_output and state.input_text:
+                    log.info("live[user said]: %r", state.input_text)
                     await transport.send_event(
                         {"type": "transcript", "role": "lead", "text": state.input_text}
                     )
@@ -301,6 +322,7 @@ class GeminiLiveAgentSession:
 
             if event.turn_complete:
                 turn_text = state.output_text
+                log.info("live[agent turn done]: %r", turn_text)
                 if turn_text:
                     await transport.send_event(
                         {"type": "transcript", "role": "agent", "text": turn_text}

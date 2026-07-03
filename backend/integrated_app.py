@@ -75,6 +75,18 @@ log = logging.getLogger("voice_agent_studio.integrated")
 
 
 def build_app() -> FastAPI:
+    # Make our own INFO logs visible in the console: uvicorn configures its own loggers,
+    # not the app's, so without this the live-preview diagnostics (mic streamed, barge-in,
+    # what Live transcribed, each agent turn) would be swallowed. One handler on the
+    # package root; propagate=False so lines aren't duplicated by uvicorn's root handler.
+    app_log = logging.getLogger("voice_agent_studio")
+    app_log.setLevel(logging.INFO)
+    if not app_log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        app_log.addHandler(handler)
+        app_log.propagate = False
+
     # Base = the Phase-1 studio app (its routes, seeded demo agent, config-gate error
     # handler, and current_user override are already installed inside build_studio_app).
     app = build_studio_app()
