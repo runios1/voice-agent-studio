@@ -129,9 +129,18 @@ async def test_stream_body_yields_wrapped_frames():
 # §4b.5 — seed resolution: inline fallback now, INT-C picked up when present
 # --------------------------------------------------------------------------- #
 def test_seed_resolution_falls_back_without_int_c():
-    # INT-C's module is not merged; resolution must return None (inline seed used).
-    assert "backend.phase2_demo" not in sys.modules
-    assert _resolve_seed_and_run() is None
+    # When the demo module can't be imported (pre-INT-C, or a missing deploy), resolution
+    # must return None so the inline seed is used. INT-C is now merged, so force the
+    # absent state deterministically: `None` in sys.modules makes the import raise.
+    saved = sys.modules.get("backend.phase2_demo")
+    sys.modules["backend.phase2_demo"] = None  # type: ignore[assignment]
+    try:
+        assert _resolve_seed_and_run() is None
+    finally:
+        if saved is not None:
+            sys.modules["backend.phase2_demo"] = saved
+        else:
+            del sys.modules["backend.phase2_demo"]
 
 
 def test_seed_resolution_picks_up_int_c_when_present():
