@@ -1,6 +1,11 @@
 # WS2 — config gate + persistence
-pydantic>=2.0          # schema validation (frozen contract uses pydantic v2)
-fastapi>=0.110         # thin HTTP router (api.py)
-httpx                  # required by fastapi.testclient (tests)
-# Production storage only — NOT needed for CI/import (imported lazily):
-# psycopg[binary]>=3    # PostgresConfigRepository
+#
+# P3-7 reconciled these deps into the root requirements.txt (the whole repo
+# installs from one file now). Kept here only as a note for anyone running
+# this package in isolation:
+#   pydantic  — schema validation (frozen contract uses pydantic v2)
+#   fastapi   — thin HTTP router (api.py)
+#   httpx     — required by fastapi.testclient (tests)
+#   psycopg[binary] — PostgresConfigRepository, optional, lazily imported
+#
+# From the repo root: pip install -r requirements.txt

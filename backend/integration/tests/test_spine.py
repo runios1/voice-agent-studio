@@ -36,9 +36,10 @@ from backend.integration.dialer import RealDialer
 from backend.integration.runtime import ToolStack
 from backend.integration.supervisor import SupervisedOrchestrator
 
-from backend.tool_registry.connections import ConnectionStore
+from backend.tool_registry.connections import ConnectionManager, ConnectionStore
 from backend.tool_registry.credentials import EncryptedCredentialStore, generate_key
 from backend.tool_registry.integrations import MockCalendarClient, MockEmailClient
+from backend.tool_registry.oauth import FakeOAuthProvider
 
 
 TENANT = "dev-user"
@@ -60,11 +61,21 @@ def _script_wrapper() -> ScriptedToolWrapper:
 
 
 def _tool_stack() -> ToolStack:
+    connections = ConnectionStore()
+    credentials = EncryptedCredentialStore(key=generate_key())
     stack = ToolStack(
-        connections=ConnectionStore(),
-        credentials=EncryptedCredentialStore(key=generate_key()),
+        connections=connections,
+        credentials=credentials,
         calendar_client=MockCalendarClient(),
         email_client=MockEmailClient(),
+        connection_manager=ConnectionManager(
+            {
+                "google_calendar": FakeOAuthProvider("google_calendar"),
+                "gmail": FakeOAuthProvider("gmail"),
+            },
+            connections,
+            credentials,
+        ),
     )
     # Real OAuth would create these; seed a placeholder so the mock client has a token.
     stack.ensure_dev_connections(TENANT)

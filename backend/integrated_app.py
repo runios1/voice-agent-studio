@@ -25,6 +25,7 @@ Run:  set -a && source .env && set +a          # Phase-1 needs GEMINI_API_KEY
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import FastAPI
 
@@ -45,6 +46,11 @@ from backend.orchestrator.control_api import (
     current_user,
 )
 from backend.phase2_app import DEV_USER, EventServiceSink
+from backend.tool_registry.connections_router import (
+    create_router as create_connections_router,
+    current_tenant as connections_current_tenant,
+    install_error_handler as install_connections_error_handler,
+)
 
 from backend.integration.config_source import AgentServiceConfigSource
 from backend.integration.dialer import RealDialer
@@ -91,15 +97,31 @@ def build_app() -> FastAPI:
     app.state.orch = orch
     app.state.tool_stack = tool_stack
 
+    # Backend's own OAuth callback URL (must match what's registered with the
+    # provider) vs. where the browser bounces back to in the app once it's run.
+    oauth_redirect_base = os.getenv("OAUTH_REDIRECT_BASE_URL", "http://localhost:8000")
+    app_base_url = os.getenv("APP_BASE_URL", "http://localhost:5173")
+
     app.include_router(create_orch_router(orch), prefix="/api")
     app.include_router(create_events_router(events), prefix="/api")
+    app.include_router(
+        create_connections_router(
+            tool_stack.connection_manager,
+            tool_stack.connections,
+            redirect_uri=f"{oauth_redirect_base}/api/oauth/callback",
+            app_redirect_url=app_base_url,
+        ),
+        prefix="/api",
+    )
     install_orch_error_handler(app)
     install_events_error_handler(app)
+    install_connections_error_handler(app)
 
     # Phase-2 dev auth: same fixed identity as Phase-1 (user == tenant == "dev-user"),
     # so the dashboard's tenant sees the seeded campaigns/events.
     app.dependency_overrides[current_user] = lambda: DEV_USER
     app.dependency_overrides[current_tenant] = lambda: DEV_USER
+    app.dependency_overrides[connections_current_tenant] = lambda: DEV_USER
 
     @app.on_event("startup")
     async def _prime() -> None:
