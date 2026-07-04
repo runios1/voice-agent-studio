@@ -120,6 +120,11 @@ class CalendarHandler(_BaseHandler):
 
     async def execute(self, args: dict, ctx: ToolContext) -> dict:
         start = _parse_iso(args.get("start_iso"), tool=self.tool_name)
+        # A naive time means the model dropped the offset — interpret it as the
+        # platform's local wall-clock (what availability offered and the lead was told),
+        # NOT UTC, so the event lands at the right hour on a UTC+n host.
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=gr.platform_tz())
         attendee_email = args.get("attendee_email") or None
 
         # --- guardrails, in code, before any side effect ---
@@ -174,11 +179,15 @@ class AvailabilityHandler(_BaseHandler):
 
         length = timedelta(minutes=self._policy.meeting_length_minutes)
         cadence = timedelta(minutes=_SLOT_CADENCE_MINUTES)
+        # Build the day window in the platform's LOCAL timezone so calling_hours are
+        # local wall-clock; the resulting slots carry the right offset (e.g. +03:00),
+        # so booking one lands at that local time, not its UTC equivalent.
+        tz = gr.platform_tz()
         day_start = datetime(
-            day.year, day.month, day.day, self._policy.calling_hours_start, tzinfo=timezone.utc
+            day.year, day.month, day.day, self._policy.calling_hours_start, tzinfo=tz
         )
         day_end = datetime(
-            day.year, day.month, day.day, self._policy.calling_hours_end, tzinfo=timezone.utc
+            day.year, day.month, day.day, self._policy.calling_hours_end, tzinfo=tz
         )
 
         now = datetime.now(timezone.utc)

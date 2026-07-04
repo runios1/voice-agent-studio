@@ -123,6 +123,28 @@ async def test_attendee_email_is_validated_and_passed_to_the_client(
     assert calendar_client.booked[0].attendee_email == "lead@acme.co"
 
 
+async def test_naive_booking_time_is_interpreted_as_platform_local(
+    connections, credentials, sink, calendar_client, manager
+):
+    # A time with no offset must book at the platform-local wall-clock, not UTC — the
+    # bug where an Israel (UTC+3) booking landed 3 hours ahead.
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from backend.tool_registry.guardrails import platform_tz
+
+    config = make_config(email_enabled=False, calling_hours=(0, 23))
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    naive = (_dt.now(_tz.utc) + _td(days=1)).replace(
+        hour=15, minute=0, second=0, microsecond=0, tzinfo=None
+    ).isoformat()
+
+    result = await reg.execute("calendar", {"start_iso": naive}, TENANT)
+
+    booked = _dt.fromisoformat(result["start_iso"])
+    assert booked.tzinfo is not None  # localized, not left naive
+    # the local wall-clock hour is preserved as 15:00 local (not shifted into UTC)
+    assert booked.astimezone(platform_tz()).hour == 15
+
+
 async def test_malformed_attendee_email_is_rejected_and_trips(
     connections, credentials, sink, calendar_client, manager
 ):
@@ -178,10 +200,15 @@ async def test_availability_excludes_busy_periods(
 ):
     config = make_config(email_enabled=False, calling_hours=(9, 17))
     reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
-    day = datetime.now(timezone.utc) + timedelta(days=1)
-    busy_start = day.replace(hour=9, minute=0, second=0, microsecond=0)
-    # Block the whole calling-hours window.
-    calendar_client.busy = [(busy_start, busy_start.replace(hour=17))]
+    # Block the whole calling-hours window, defined in the platform-local tz (calling
+    # hours are local now, not UTC).
+    from backend.tool_registry.guardrails import platform_tz
+
+    tz = platform_tz()
+    d = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    calendar_client.busy = [
+        (datetime(d.year, d.month, d.day, 9, tzinfo=tz), datetime(d.year, d.month, d.day, 17, tzinfo=tz))
+    ]
 
     result = await reg.execute(
         "check_availability", {"date_iso": _tomorrow_date_iso()}, TENANT

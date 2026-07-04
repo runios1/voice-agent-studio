@@ -48,3 +48,7 @@ psycopg[binary]>=3.1
 # Google Calendar, Resend email, and Model Armor all go over the httpx client above
 # (no dedicated SDK) — see contracts/provider_clients, backend/integration/resend_email.py,
 # and backend/tool_registry/oauth.py. Enabling them needs only their env keys.
+
+# Cross-platform IANA timezone database for zoneinfo (calling hours / booking are
+# resolved in the platform-local tz; slim base images ship no system tz data).
+tzdata

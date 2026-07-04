@@ -20,13 +20,39 @@ literally cannot read anything it isn't handed — least context (D-security).
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from contracts.config_schema.schema import AgentConfig
 from backend.tool_registry.errors import GuardrailViolation
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - stdlib since 3.9; guard is belt-and-braces
+    ZoneInfo = None  # type: ignore[assignment]
+
+log = logging.getLogger("voice_agent_studio.tool_registry.guardrails")
+
+# The platform's LOCAL timezone. calling_hours are `*_local` (per the schema) and a
+# booked slot's wall-clock must match what the lead was told — but the code historically
+# treated both as UTC, so on a UTC+n host every booking landed n hours off. This is the
+# one place that resolves "local": an IANA name from PLATFORM_TIMEZONE, defaulting to
+# Israel (the deployment's locale). ZoneInfo handles DST (IDT/IST) correctly.
+_DEFAULT_PLATFORM_TZ = "Asia/Jerusalem"
+
+
+def platform_tz():
+    name = os.getenv("PLATFORM_TIMEZONE") or _DEFAULT_PLATFORM_TZ
+    if ZoneInfo is not None:
+        try:
+            return ZoneInfo(name)
+        except Exception:  # bad name or missing tz database
+            log.warning("PLATFORM_TIMEZONE %r unavailable; falling back to UTC", name)
+    return timezone.utc
 
 # Deliberately loose — this rejects obviously-malformed input, not RFC 5322
 # compliance. Real deliverability is the provider's problem, not a guardrail's.
@@ -82,11 +108,13 @@ def check_within_calling_hours(
 ) -> None:
     """Reject a slot whose LOCAL hour falls outside the platform calling window.
 
-    `start` is interpreted in whatever offset it carries; the guardrail is on the
-    wall-clock hour the lead experiences. Half-open [start_hour, end_hour): a slot
-    at exactly end_hour is already out of hours.
+    The guardrail is on the wall-clock hour the lead experiences, so an aware `start`
+    is converted to the platform's local timezone first (a slot sent as UTC or any
+    other offset is judged by its LOCAL hour, not the raw one). Half-open
+    [start_hour, end_hour): a slot at exactly end_hour is already out of hours.
     """
-    hour = start.hour
+    local = start.astimezone(platform_tz()) if start.tzinfo is not None else start
+    hour = local.hour
     if hour < policy.calling_hours_start or hour >= policy.calling_hours_end:
         raise GuardrailViolation(
             (
