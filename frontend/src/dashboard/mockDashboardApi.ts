@@ -127,13 +127,15 @@ export function createMockDashboardApi(): DashboardApi {
     setInterval(() => {
       const call_id = `call-${(i % 3) + 1}`;
       const lead_id = `${cid}-lead-${(i % 3) + 1}`;
+      const slotStart = new Date(Date.now() + 2 * 86400000).toISOString();
       const kinds: Array<[EventType, Record<string, unknown>, Severity?]> = [
-        ["call.started", { lead_name: `Lead ${(i % 3) + 1}` }],
-        ["disclosure.spoken", { speaker: "agent", utterance: "Hi, I'm an AI assistant for Acme." }],
-        ["tool.invoked", { tool: "calendar.check_availability" }],
-        ["slot.booked", { slot: "Thu 2:00pm", speaker: "lead", utterance: "Thursday works." }],
-        ["lead.outcome", { outcome: i % 2 ? "qualified" : "not_interested" }],
-        ["call.ended", {}],
+        ["call.started", { lead_name: `Lead ${(i % 3) + 1}`, to_number: `+1555000${1000 + (i % 3) + 1}` }],
+        ["disclosure.spoken", { speaker: "agent", utterance: "Hi, I'm an AI assistant for Acme.", text: "Hi, I'm an AI assistant for Acme." }],
+        ["tool.invoked", { tool_name: "check_availability" }],
+        ["slot.booked", { slot_start: slotStart, calendar_id: "sales@acme.com", speaker: "lead", utterance: "Thursday works." }],
+        ["tool.invoked", { tool_name: "email", params: { to: `lead${(i % 3) + 1}@example.com` }, result_status: "ok" }],
+        ["lead.outcome", { outcome: i % 2 ? "qualified" : "not_qualified" }],
+        ["call.ended", { ended_reason: i % 3 === 0 ? "no_answer" : "completed", duration_seconds: 92 }],
       ];
       if (i % 7 === 6) {
         emit("guardrail.tripped", {

@@ -110,3 +110,208 @@ export const CAMPAIGN_LIFECYCLE_TYPES = new Set<Event["type"]>([
   "campaign.autopaused",
   "campaign.resumed",
 ]);
+
+// --------------------------------------------------------------------------- //
+// Per-lead call detail — the "who was dialed / who answered / qualified? / booked?
+// / emailed?" drill-down. Folds a lead's event trail onto its snapshot so an
+// operator can see, per lead, exactly what happened and when. Pure: it summarizes
+// the stream + snapshot, it never invents state (P2-7 boundary).
+// --------------------------------------------------------------------------- //
+
+/** How a dial resolved, derived from the last `call.ended` reason (or an in-flight
+ *  call). `not_dialed` = never dialed yet. */
+export type AnswerStatus =
+  | "answered"
+  | "no_answer"
+  | "voicemail"
+  | "in_progress"
+  | "failed"
+  | "not_dialed";
+
+export interface Booking {
+  start?: string; // ISO or free label of the booked slot
+  end?: string;
+  where?: string; // calendar id / location, when the event carries one
+}
+
+export interface EmailSent {
+  at: string; // when the email tool ran
+  to?: string; // recipient, when the payload carries one
+  status?: string; // ok / error / denied
+}
+
+/** A single lead's full story, folded from its snapshot + event trail. */
+export interface LeadRecord {
+  lead: Lead;
+  dialed: boolean;
+  attempts: number;
+  answer: AnswerStatus;
+  endedReason: string | null;
+  outcome: string | null; // raw outcome string (qualified / not_qualified / …)
+  qualified: boolean | null; // true / false / null(=unknown)
+  booking: Booking | null;
+  email: EmailSent | null;
+  disclosed: boolean;
+  escalated: boolean;
+  followups: number;
+  guardrailTrips: number;
+  toNumber: string | null;
+  lastActivityAt: string | null;
+  callId: string | null;
+  events: Event[]; // this lead's events, oldest-first
+}
+
+/** Read the first present string value among candidate payload keys. */
+function pickStr(p: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = p[k];
+    if (typeof v === "string" && v) return v;
+    if (typeof v === "number") return String(v);
+  }
+  return undefined;
+}
+
+const ANSWERED_REASONS = new Set(["completed", "hangup", "answered"]);
+const VOICEMAIL_REASONS = new Set(["voicemail"]);
+const NO_ANSWER_REASONS = new Set(["no_answer", "busy", "rejected", "canceled"]);
+
+function qualifiedFrom(outcome: string | null): boolean | null {
+  // A booked meeting IS a qualified lead (the orchestrator records the terminal lead
+  // outcome as "booked"; the lead.outcome EVENT says "qualified" — treat both as such).
+  if (outcome === "qualified" || outcome === "booked") return true;
+  if (outcome === "not_qualified" || outcome === "do_not_call" || outcome === "opted_out")
+    return false;
+  return null;
+}
+
+/** Map each call_id to the lead it belongs to, using (a) the lead snapshot's
+ *  `last_call_id` and (b) any event that carries BOTH a call_id and a lead_id. This
+ *  lets call-scoped events that omit `lead_id` still attach to the right lead. */
+function callToLead(leads: Lead[], events: Event[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const l of leads) if (l.last_call_id) map.set(l.last_call_id, l.id);
+  for (const e of events) {
+    if (e.call_id && e.lead_id && !map.has(e.call_id)) map.set(e.call_id, e.lead_id);
+  }
+  return map;
+}
+
+/** Build one `LeadRecord` per lead by folding the campaign's events onto each lead's
+ *  snapshot. `events` should be the campaign-scoped trail (history + live tail). The
+ *  snapshot wins for authoritative fields (state, attempts, outcome); the stream
+ *  fills in the "what happened" detail (answered?, booked?, emailed?, when). */
+export function buildLeadRecords(leads: Lead[], events: Event[]): LeadRecord[] {
+  const byCall = callToLead(leads, events);
+  const perLead = new Map<string, Event[]>();
+  for (const l of leads) perLead.set(l.id, []);
+  for (const e of events) {
+    const leadId = e.lead_id ?? (e.call_id ? byCall.get(e.call_id) : undefined);
+    if (leadId && perLead.has(leadId)) perLead.get(leadId)!.push(e);
+  }
+
+  return leads.map((lead) => {
+    const evs = (perLead.get(lead.id) ?? [])
+      .slice()
+      .sort((a, b) => a.occurred_at.localeCompare(b.occurred_at));
+
+    let answer: AnswerStatus = "not_dialed";
+    let endedReason: string | null = null;
+    let booking: Booking | null = null;
+    let email: EmailSent | null = null;
+    let disclosed = false;
+    let escalated = false;
+    let followups = 0;
+    let guardrailTrips = 0;
+    let toNumber: string | null = null;
+    let outcomeEvent: string | null = null;
+    let dialedFromEvents = false;
+
+    for (const e of evs) {
+      const p = e.payload ?? {};
+      switch (e.type) {
+        case "call.started":
+          dialedFromEvents = true;
+          answer = "in_progress";
+          toNumber = pickStr(p, "to_number", "to") ?? toNumber;
+          break;
+        case "call.ended": {
+          endedReason = pickStr(p, "ended_reason") ?? endedReason;
+          if (endedReason && ANSWERED_REASONS.has(endedReason)) answer = "answered";
+          else if (endedReason && VOICEMAIL_REASONS.has(endedReason)) answer = "voicemail";
+          else if (endedReason && NO_ANSWER_REASONS.has(endedReason)) answer = "no_answer";
+          else if (endedReason === "error") answer = "failed";
+          else answer = "answered"; // ended with no explicit reason → the call connected
+          break;
+        }
+        case "disclosure.spoken":
+          disclosed = true;
+          break;
+        case "slot.booked":
+          booking = {
+            start: pickStr(p, "slot_start", "slot", "start_iso", "start"),
+            end: pickStr(p, "slot_end"),
+            where: pickStr(p, "calendar_id", "location"),
+          };
+          break;
+        case "tool.invoked": {
+          const tool = pickStr(p, "tool_name", "tool", "name") ?? "";
+          if (/email/i.test(tool)) {
+            const params = (p.params ?? {}) as Record<string, unknown>;
+            email = {
+              at: e.occurred_at,
+              to: pickStr(p, "to") ?? pickStr(params, "to", "attendee_email", "recipient"),
+              status: pickStr(p, "result_status"),
+            };
+          }
+          break;
+        }
+        case "lead.outcome":
+          outcomeEvent = pickStr(p, "outcome") ?? outcomeEvent;
+          break;
+        case "followup.scheduled":
+          followups++;
+          break;
+        case "call.escalated":
+          escalated = true;
+          break;
+        case "guardrail.tripped":
+          guardrailTrips++;
+          break;
+      }
+    }
+
+    // Snapshot is authoritative for outcome; the stream fills in when it's absent.
+    const outcome = lead.outcome ?? outcomeEvent;
+    const dialed =
+      dialedFromEvents ||
+      lead.attempts > 0 ||
+      !!lead.last_call_id ||
+      (lead.state !== "queued" && lead.state !== "done") ||
+      (lead.state === "done" && !!outcome);
+
+    // If the lead is mid-call per the snapshot but we saw no ended event, reflect that.
+    if (answer === "not_dialed" && (lead.state === "in_call" || lead.state === "dialing")) {
+      answer = "in_progress";
+    }
+
+    return {
+      lead,
+      dialed,
+      attempts: lead.attempts,
+      answer,
+      endedReason,
+      outcome,
+      qualified: qualifiedFrom(outcome),
+      booking,
+      email,
+      disclosed,
+      escalated,
+      followups,
+      guardrailTrips,
+      toNumber: toNumber ?? lead.phone ?? null,
+      lastActivityAt: evs.length ? evs[evs.length - 1].occurred_at : null,
+      callId: lead.last_call_id ?? evs.find((e) => e.call_id)?.call_id ?? null,
+      events: evs,
+    };
+  });
+}

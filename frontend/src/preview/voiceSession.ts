@@ -7,6 +7,7 @@
  */
 import type { ServerMessage } from "./protocol";
 import { voiceWsPath } from "./protocol";
+import type { Event as DashboardEvent } from "../dashboard/types";
 import { startMicCapture, type MicCapture } from "./audioCapture";
 import { createPlaybackQueue, type PlaybackQueue } from "./audioPlayback";
 
@@ -29,6 +30,8 @@ export interface VoiceSessionCallbacks {
   onOutcome?(outcome: string): void;
   onError?(message: string): void;
   onEnded?(outcome?: string): void;
+  /** A structured event the server recorded for this call (live preview dashboard). */
+  onEvent?(event: DashboardEvent): void;
 }
 
 /** Minimal surface this module needs from a WebSocket — real sockets and fakes
@@ -145,6 +148,9 @@ export class VoiceSession {
           break;
         case "outcome":
           this.callbacks.onOutcome?.(msg.outcome);
+          break;
+        case "event":
+          this.callbacks.onEvent?.(msg.event);
           break;
         case "error":
           this.callbacks.onError?.(msg.message);

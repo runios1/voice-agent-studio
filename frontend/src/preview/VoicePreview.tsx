@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { VoiceSession, type SessionStatus } from "./voiceSession";
+import { PreviewCallDashboard } from "./PreviewCallDashboard";
+import type { Event as DashboardEvent } from "../dashboard/types";
 
 interface TranscriptLine {
   id: string;
@@ -22,6 +24,7 @@ export function VoicePreview({ agentId }: { agentId: string }) {
   const [disclosed, setDisclosed] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [events, setEvents] = useState<DashboardEvent[]>([]);
   const sessionRef = useRef<VoiceSession | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -37,6 +40,7 @@ export function VoicePreview({ agentId }: { agentId: string }) {
     setDisclosed(false);
     setOutcome(null);
     setError(null);
+    setEvents([]);
     const session = new VoiceSession(agentId, {
       onStatus: setStatus,
       onTranscript: (role, text) =>
@@ -45,6 +49,7 @@ export function VoicePreview({ agentId }: { agentId: string }) {
       onOutcome: setOutcome,
       onError: setError,
       onEnded: (o) => setOutcome((prev) => o ?? prev),
+      onEvent: (e) => setEvents((es) => [...es, e]),
     });
     sessionRef.current = session;
     void session.start();
@@ -57,7 +62,11 @@ export function VoicePreview({ agentId }: { agentId: string }) {
   const busy = status === "connecting" || status === "live";
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="voice-preview">
+    <div
+      className="grid h-full min-h-0 grid-cols-1 md:grid-cols-[minmax(0,1fr)_480px] xl:grid-cols-[minmax(0,1fr)_640px] 2xl:grid-cols-[minmax(0,1fr)_860px]"
+      data-testid="voice-preview"
+    >
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden md:border-r md:border-line">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {disclosed && (
@@ -132,6 +141,13 @@ export function VoicePreview({ agentId }: { agentId: string }) {
             </button>
           )}
         </div>
+      </div>
+      </div>
+
+      {/* Live mirror of how this call lands in the ops Call-details view. Hidden on
+          narrow screens where the conversation takes the full width. */}
+      <div className="hidden min-h-0 min-w-0 overflow-hidden md:flex md:flex-col">
+        <PreviewCallDashboard events={events} />
       </div>
     </div>
   );

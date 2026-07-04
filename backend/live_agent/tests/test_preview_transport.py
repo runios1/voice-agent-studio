@@ -117,7 +117,7 @@ def _build_app(config, *, session: _ScriptedSession, compiler=None, registry=Non
         _FakeRegistryBuilder(registry),
         compiler or _FakeCompiler(),
         sink or CollectingEventSink(),
-        session_factory=lambda: session,
+        session_factory=lambda _sink: session,
         moderator_factory=_FakeModerator,
     )
     app.include_router(router)

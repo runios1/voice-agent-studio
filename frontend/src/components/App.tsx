@@ -89,7 +89,16 @@ export function App({
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px]">
+      {/* Build shows the Agent panel (agent details) alongside the chat. Preview drops
+          it and goes full-width: the talking preview already carries its own live
+          "In your dashboard" pane, so the agent-config panel is redundant there and the
+          Call-details table gets the whole width. */}
+      <div
+        className={clsx(
+          "grid min-h-0 flex-1",
+          tab === "preview" ? "grid-cols-1" : "grid-cols-[1fr_360px]",
+        )}
+      >
         <main className="min-h-0">
           {!config ? (
             <div className="flex h-full items-center justify-center text-muted">
@@ -101,9 +110,11 @@ export function App({
             <PreviewChat />
           )}
         </main>
-        <aside className="min-h-0">
-          <AgentPanel />
-        </aside>
+        {tab !== "preview" && (
+          <aside className="min-h-0">
+            <AgentPanel />
+          </aside>
+        )}
       </div>
     </div>
   );

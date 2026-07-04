@@ -22,6 +22,7 @@ import type { LiveServerMessage } from "./livePreviewProtocol";
 import { voiceWsPath } from "./livePreviewProtocol";
 import { startMicCapture, type MicCapture } from "./audioCapture";
 import { createPlaybackQueue, type PlaybackQueue } from "./audioPlayback";
+import type { Event as DashboardEvent } from "../dashboard/types";
 
 const WS_OPEN = 1; // WebSocket.OPEN
 
@@ -40,6 +41,9 @@ export interface LiveVoiceSessionCallbacks {
   onError?(message: string): void;
   onEnded?(outcome?: string): void;
   onIndicator?(state: SpeakingIndicator): void;
+  /** A structured event the server recorded for this call — drives the live preview
+   *  dashboard mirror. Same shape the ops dashboard consumes. */
+  onEvent?(event: DashboardEvent): void;
 }
 
 export interface SocketLike {
@@ -154,6 +158,9 @@ export class LiveVoiceSession {
           break;
         case "outcome":
           this.callbacks.onOutcome?.(msg.outcome);
+          break;
+        case "event":
+          this.callbacks.onEvent?.(msg.event);
           break;
         case "error":
           this.callbacks.onError?.(msg.message);

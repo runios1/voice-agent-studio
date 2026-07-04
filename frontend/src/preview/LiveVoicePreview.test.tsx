@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveVoicePreview } from "./LiveVoicePreview";
@@ -80,6 +80,37 @@ describe("LiveVoicePreview", () => {
       session.callbacks.onIndicator?.("listening");
     });
     expect(screen.getByTestId("speaking-indicator")).toHaveTextContent("Listening");
+  });
+
+  it("fills the side-by-side preview dashboard from onEvent", async () => {
+    render(<LiveVoicePreview agentId="agent-1" />);
+    await userEvent.click(screen.getByTestId("live-talk-button"));
+    const session = FakeSession.instances[0];
+
+    const ev = (type: string, payload: Record<string, unknown>) => ({
+      event_id: `e-${Math.random()}`,
+      type,
+      occurred_at: new Date().toISOString(),
+      severity: "info",
+      tenant_id: "preview",
+      campaign_id: "preview",
+      lead_id: null,
+      call_id: "call-1",
+      agent_id: "agent-1",
+      payload,
+    });
+
+    act(() => {
+      session.callbacks.onStatus?.("live");
+      session.callbacks.onEvent?.(ev("call.started", {}) as never);
+      session.callbacks.onEvent?.(ev("slot.booked", { slot_start: "2026-08-01T15:00:00Z" }) as never);
+      session.callbacks.onEvent?.(ev("lead.outcome", { outcome: "qualified" }) as never);
+      session.callbacks.onEvent?.(ev("call.ended", { ended_reason: "booked" }) as never);
+    });
+
+    const row = await screen.findByTestId("lead-row-preview-call");
+    expect(within(row).getByText("Qualified")).toBeInTheDocument();
+    expect(within(row).getByTestId("meeting-preview-call")).toBeInTheDocument();
   });
 
   it("renders a tool badge on onTool", async () => {

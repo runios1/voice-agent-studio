@@ -45,6 +45,12 @@ export interface DashboardState {
   selectedCampaignId: string | null;
   selectedCallId: string | null;
   selectedCampaign: CampaignDetail | null;
+  /** The selected campaign's durable event history (from the audit log), loaded on
+   *  drill-in so the call-detail view reflects the WHOLE campaign — not just what
+   *  streamed into the bounded live tail since the dashboard opened. Live events for
+   *  this campaign are merged on top of it in the view. */
+  campaignEvents: Event[];
+  campaignEventsLoading: boolean;
 
   auditFilter: AuditFilter;
   auditResults: Event[];
@@ -123,6 +129,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => {
     selectedCampaignId: null,
     selectedCallId: null,
     selectedCampaign: null,
+    campaignEvents: [],
+    campaignEventsLoading: false,
 
     auditFilter: { limit: 200 },
     auditResults: [],
@@ -209,14 +217,36 @@ export const useDashboardStore = create<DashboardState>((set, get) => {
 
     openCampaign: async (id) => {
       const api = get().api;
-      set({ view: "campaign", selectedCampaignId: id, selectedCallId: null });
-      if (!api) return;
-      try {
-        const detail = await api.getCampaign(id);
-        set({ selectedCampaign: detail });
-      } catch {
-        set({ loadError: "Couldn't load that campaign." });
+      // Clear the previous campaign's history so the detail view never shows stale
+      // rows from another campaign while this one loads.
+      set({
+        view: "campaign",
+        selectedCampaignId: id,
+        selectedCallId: null,
+        campaignEvents: [],
+        campaignEventsLoading: true,
+      });
+      if (!api) {
+        set({ campaignEventsLoading: false });
+        return;
       }
+      // Detail (campaign + leads) and the durable event history load in parallel; a
+      // failure of either is non-fatal to the other.
+      const detailP = api
+        .getCampaign(id)
+        .then((detail) => set({ selectedCampaign: detail }))
+        .catch(() => set({ loadError: "Couldn't load that campaign." }));
+      const historyP = api
+        .queryAudit({ campaign_id: id, limit: 1000 })
+        .then((campaignEvents) => {
+          // Guard against a slow response for a campaign the user already left.
+          if (get().selectedCampaignId === id) set({ campaignEvents });
+        })
+        .catch(() => {
+          /* history is best-effort; the live tail still feeds the view */
+        });
+      await Promise.allSettled([detailP, historyP]);
+      if (get().selectedCampaignId === id) set({ campaignEventsLoading: false });
     },
 
     openCall: (callId) => set({ view: "live-call", selectedCallId: callId }),

@@ -201,7 +201,9 @@ def build_app() -> FastAPI:
             tool_stack,
             LiveAgentCompilerImpl(),
             sink,
-            session_factory=lambda: GeminiLiveAgentSession(sink),
+            # The preview router hands each call a per-connection sink that both records
+            # events AND mirrors them to the browser for the live preview dashboard.
+            session_factory=lambda call_sink: GeminiLiveAgentSession(call_sink),
             moderator_factory=lambda: build_stream_moderator(screener),
         ),
         prefix="/api",

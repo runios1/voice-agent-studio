@@ -9,9 +9,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import {
   LiveVoiceSession,
+  type LiveVoiceSessionDeps,
   type SessionStatus,
   type SpeakingIndicator,
 } from "./liveVoiceSession";
+import { PreviewCallDashboard } from "./PreviewCallDashboard";
+import type { Event as DashboardEvent } from "../dashboard/types";
 
 type LineKind = "agent" | "lead" | "tool" | "moderation";
 
@@ -24,13 +27,22 @@ interface Line {
 
 let lineSeq = 0;
 
-export function LiveVoicePreview({ agentId }: { agentId: string }) {
+export function LiveVoicePreview({
+  agentId,
+  deps,
+}: {
+  agentId: string;
+  /** Injected socket/mic/playback — real by default; a scripted double in the dev
+   *  demo and (via module mock) in tests. */
+  deps?: LiveVoiceSessionDeps;
+}) {
   const [status, setStatus] = useState<SessionStatus>("idle");
   const [indicator, setIndicator] = useState<SpeakingIndicator>("listening");
   const [lines, setLines] = useState<Line[]>([]);
   const [disclosed, setDisclosed] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [events, setEvents] = useState<DashboardEvent[]>([]);
   const sessionRef = useRef<LiveVoiceSession | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -45,6 +57,7 @@ export function LiveVoicePreview({ agentId }: { agentId: string }) {
     setDisclosed(false);
     setOutcome(null);
     setError(null);
+    setEvents([]);
     setIndicator("listening");
     const session = new LiveVoiceSession(agentId, {
       onStatus: setStatus,
@@ -70,10 +83,11 @@ export function LiveVoicePreview({ agentId }: { agentId: string }) {
       onOutcome: setOutcome,
       onError: setError,
       onEnded: (o) => setOutcome((prev) => o ?? prev),
-    });
+      onEvent: (e) => setEvents((es) => [...es, e]),
+    }, deps);
     sessionRef.current = session;
     void session.start();
-  }, [agentId]);
+  }, [agentId, deps]);
 
   const hangUp = useCallback(() => {
     sessionRef.current?.stop();
@@ -82,7 +96,11 @@ export function LiveVoicePreview({ agentId }: { agentId: string }) {
   const busy = status === "connecting" || status === "live";
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="live-voice-preview">
+    <div
+      className="grid h-full min-h-0 grid-cols-1 md:grid-cols-[minmax(0,1fr)_480px] xl:grid-cols-[minmax(0,1fr)_640px] 2xl:grid-cols-[minmax(0,1fr)_860px]"
+      data-testid="live-voice-preview"
+    >
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden md:border-r md:border-line">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {disclosed && (
@@ -192,6 +210,13 @@ export function LiveVoicePreview({ agentId }: { agentId: string }) {
             </button>
           )}
         </div>
+      </div>
+      </div>
+
+      {/* Live mirror of how this call lands in the ops Call-details view — fills in as
+          the call progresses. Hidden on narrow screens (conversation takes full width). */}
+      <div className="hidden min-h-0 min-w-0 overflow-hidden md:flex md:flex-col">
+        <PreviewCallDashboard events={events} />
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ export type {
   OutcomeMessage,
   ErrorMessage,
   EndedMessage,
+  EventMessage,
 } from "./protocol";
 
 import type {
@@ -31,6 +32,7 @@ import type {
   OutcomeMessage,
   ErrorMessage,
   EndedMessage,
+  EventMessage,
 } from "./protocol";
 
 // --- new for Phase 4 (server -> client only) ------------------------------------ //
@@ -58,6 +60,7 @@ export type LiveServerMessage =
   | OutcomeMessage
   | ErrorMessage
   | EndedMessage
+  | EventMessage
   | ToolMessage
   | ModerationMessage
   | CutPlaybackMessage;

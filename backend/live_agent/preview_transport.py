@@ -39,6 +39,7 @@ from typing import AsyncIterator, Awaitable, Callable, Optional, Protocol
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from contracts.config_schema.schema import AgentConfig
+from contracts.events.schema import Event
 from contracts.live_agent.interface import (
     LiveAgentCompiler,
     LiveAgentSession,
@@ -154,13 +155,36 @@ class _SerializedSender:
                 self._closed = True
 
 
+class _ForwardingSink:
+    """Wraps the real `EventSink` so every event STILL reaches the compliance log AND is
+    mirrored to the browser as an `{"type": "event", "event": {...}}` frame. That lets the
+    preview render a live, dashboard-identical view of THIS call (the frontend folds the
+    same events the ops dashboard does). The forwarded event is the exact wire shape the
+    dashboard consumes off its SSE stream (`Event.model_dump(mode="json")`). A send failure
+    (client already gone) is swallowed — the event is still recorded upstream, so the
+    compliance record never depends on the browser being present."""
+
+    def __init__(self, inner: EventSink, sender: "_SerializedSender") -> None:
+        self._inner = inner
+        self._sender = sender
+
+    async def emit(self, event: Event) -> None:
+        await self._inner.emit(event)
+        try:
+            await self._sender.send_json(
+                {"type": "event", "event": event.model_dump(mode="json")}
+            )
+        except Exception:  # pragma: no cover - defensive; sender already swallows normal drops
+            log.debug("preview event not forwarded (client gone): %s", event.type)
+
+
 def create_router(
     config_source: ConfigSource,
     registry_builder: RegistryBuilder,
     compiler: LiveAgentCompiler,
     sink: EventSink,
     *,
-    session_factory: Callable[[], LiveAgentSession],
+    session_factory: Callable[[EventSink], LiveAgentSession],
     moderator_factory: Callable[[], StreamModerator],
 ) -> APIRouter:
     """Factory so the config source, tool registry builder, compiler, and event sink
@@ -168,7 +192,11 @@ def create_router(
     `moderator_factory` build a FRESH instance per call (a Live session and its
     moderator both carry per-call state); they are required, not defaulted, because
     the real P4-2/P4-3 implementations don't exist in this workstream — callers pass
-    a fake in tests and the real thing at integration, once merged."""
+    a fake in tests and the real thing at integration, once merged.
+
+    `session_factory` receives the PER-CONNECTION sink (`_ForwardingSink` wrapping the
+    injected `sink`) so the session's events reach both the compliance log and the
+    browser — the session and its tool registry must share that one sink."""
     router = APIRouter()
 
     @router.websocket("/agents/{agent_id}/preview/voice")
@@ -197,11 +225,16 @@ def create_router(
             return
 
         sender = _SerializedSender(websocket)
+        # One per-connection sink: events reach the compliance log AND mirror to this
+        # browser as `event` frames (the live preview dashboard). The session and its
+        # tool registry share it so BOTH their events (call.started/slot.booked/... and
+        # tool.invoked) show up in the preview's dashboard view.
+        forwarding_sink = _ForwardingSink(sink, sender)
         spec = compiler.compile(config)
-        registry = registry_builder.registry_for(config, sink)
+        registry = registry_builder.registry_for(config, forwarding_sink)
         ctx = LiveCallContext(tenant_id=user_id, agent_id=agent_id, campaign_id="preview")
         transport = PreviewAudioTransport(sender.send_json, sender.send_bytes)
-        session = session_factory()
+        session = session_factory(forwarding_sink)
         moderator = moderator_factory()
 
         run = asyncio.ensure_future(

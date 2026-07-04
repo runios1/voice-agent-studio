@@ -203,6 +203,8 @@ export function resetStore() {
     selectedCampaignId: null,
     selectedCallId: null,
     selectedCampaign: null,
+    campaignEvents: [],
+    campaignEventsLoading: false,
     auditFilter: { limit: 200 },
     auditResults: [],
     auditLoading: false,
