@@ -33,12 +33,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Optional, Sequence
 
 from backend.tool_registry.errors import ProviderError
 
+log = logging.getLogger("voice_agent_studio.google_calendar")
+
 _EVENTS_URL_TMPL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
-_FREEBUSY_URL = "https://www.googleapis.com/calendar/v3/freeBusy"
 
 
 @dataclass
@@ -127,38 +129,60 @@ class GoogleCalendarClient:
     def busy_periods(
         self, access_token: str, start: datetime, end: datetime
     ) -> Sequence[tuple[datetime, datetime]]:
+        """Busy intervals in [start, end), read via `events.list`.
+
+        Deliberately NOT `freeBusy.query`: freeBusy needs a broader Calendar scope
+        (`calendar`/`calendar.readonly`) than the least-privilege `calendar.events`
+        scope this integration requests and that booking (`events.insert`) already
+        uses — so freeBusy returns 403 on a connection scoped only for booking. Listing
+        events on the primary calendar gives the same busy intervals within the scope
+        we already hold, so availability and booking work off one consent.
+        """
         if not access_token:
             raise ProviderError("Missing calendar credential.")
 
         import httpx  # lazy: no network/SDK cost at import time (D8)
 
-        body = {
+        url = _EVENTS_URL_TMPL.format(calendar_id=self._calendar_id)
+        params = {
             "timeMin": _rfc3339(start),
             "timeMax": _rfc3339(end),
-            "items": [{"id": self._calendar_id}],
+            "singleEvents": "true",   # expand recurring events into instances
+            "orderBy": "startTime",
+            "maxResults": "250",
         }
         try:
-            resp = httpx.post(
-                _FREEBUSY_URL,
-                json=body,
+            resp = httpx.get(
+                url,
+                params=params,
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=self._timeout,
             )
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            log.warning("calendar events.list transport error: %s", exc)
             raise ProviderError("Calendar provider request failed.")
 
         if resp.status_code >= 400:
+            # Log the status server-side (never the body — may carry account detail) so
+            # a real failure is diagnosable; the caller still gets a generic error.
+            log.warning("calendar events.list rejected: status=%s", resp.status_code)
             raise ProviderError(
-                f"Calendar provider rejected the freebusy query (status {resp.status_code})."
+                f"Calendar provider rejected the availability lookup (status {resp.status_code})."
             )
 
         data = resp.json()
-        cal = (data.get("calendars") or {}).get(self._calendar_id) or {}
-        busy = []
-        for period in cal.get("busy", []):
-            b_start = period.get("start")
-            b_end = period.get("end")
-            if not b_start or not b_end:
+        busy: list[tuple[datetime, datetime]] = []
+        for item in data.get("items", []):
+            if item.get("status") == "cancelled":
                 continue
-            busy.append((datetime.fromisoformat(b_start), datetime.fromisoformat(b_end)))
+            if item.get("transparency") == "transparent":
+                continue  # the event owner marked this time as "free" / non-blocking
+            b_start = (item.get("start") or {}).get("dateTime")
+            b_end = (item.get("end") or {}).get("dateTime")
+            if not b_start or not b_end:
+                continue  # all-day (date-only) or malformed — not a timed conflict
+            try:
+                busy.append((datetime.fromisoformat(b_start), datetime.fromisoformat(b_end)))
+            except ValueError:
+                continue
         return busy

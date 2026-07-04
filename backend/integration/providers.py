@@ -47,4 +47,14 @@ def build_email_client():
         from backend.integration.resend_email import ResendEmailClient
 
         return ResendEmailClient()
-    return MockEmailClient()
+    # Mirror the real client's platform template catalog into the mock so a template id
+    # (e.g. the seeded `booking_confirmation`) resolves in dev/unconfigured too — an
+    # empty mock template store made the confirmation send fail with "No such template".
+    from backend.integration.resend_email import _DEFAULT_TEMPLATES
+    from backend.tool_registry.integrations import EmailTemplate as MockTemplate
+
+    templates = [
+        MockTemplate(t.template_id, t.subject, t.body, list(t.links))
+        for t in _DEFAULT_TEMPLATES.values()
+    ]
+    return MockEmailClient(templates)

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -63,6 +64,8 @@ from backend.live_agent.live_connection import (
 )
 from backend.live_agent.speaker import Speaker, default_speaker
 from backend.voice_runtime.outcomes import detect_opt_out
+
+log = logging.getLogger("voice_agent_studio.live_agent.session")
 
 # The one control function Live always has (declared by the compiler alongside any
 # real tools): the agent calls it to hang up once the conversation has concluded, so a
@@ -262,6 +265,7 @@ class GeminiLiveAgentSession:
                 },
             )
         except Exception as exc:
+            log.warning("post-call confirmation email failed: %s", exc)
             await emitter.emit(
                 EventType.GUARDRAIL_TRIPPED,
                 {"guardrail": "tool_error", "detail": f"email: {exc}"},
@@ -476,6 +480,10 @@ class GeminiLiveAgentSession:
                 handler = registry.handler_for(call.name)
                 result = await handler.execute(call.args, tool_ctx)
             except Exception as exc:  # handler rejected (guardrail) or failed
+                # Surface to stdout (Render logs) too — the audit event alone is easy to
+                # miss, and a swallowed tool error is exactly what makes "it just says
+                # there was an error" undiagnosable.
+                log.warning("tool %s failed: %s", call.name, exc)
                 await emitter.emit(
                     EventType.GUARDRAIL_TRIPPED,
                     {"guardrail": "tool_error", "detail": f"{call.name}: {exc}"},

@@ -51,6 +51,31 @@ def test_reconcile_all_enables_every_connected_capability():
     assert cfg.automation.email.enabled is True
 
 
+def test_enabling_email_seeds_a_default_template_so_it_can_actually_send():
+    # An enabled-but-templateless email capability still can't send (the confirmation
+    # resolves to no template) — so enabling seeds a default template id too.
+    service, agent_id = _service_with_agent()
+    assert service.get_agent(agent_id, TENANT).automation.email.template_ids == []
+
+    conns = _FakeConnections({(TENANT, "gmail")})
+    enable_connected_capabilities(service, conns, TENANT, provider="gmail")
+
+    cfg = service.get_agent(agent_id, TENANT)
+    assert cfg.automation.email.enabled is True
+    assert cfg.automation.email.template_ids == ["booking_confirmation"]
+
+
+def test_email_reconcile_does_not_clobber_a_user_chosen_template():
+    service, agent_id = _service_with_agent()
+    # user already picked their own template
+    service.apply_patch(agent_id, TENANT, "automation.email.template_ids", ["intro"])
+
+    conns = _FakeConnections({(TENANT, "gmail")})
+    enable_connected_capabilities(service, conns, TENANT, provider="gmail")
+
+    assert service.get_agent(agent_id, TENANT).automation.email.template_ids == ["intro"]
+
+
 def test_never_enables_a_capability_whose_provider_is_not_connected():
     service, agent_id = _service_with_agent()
     conns = _FakeConnections(set())  # nothing connected

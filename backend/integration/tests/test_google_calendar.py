@@ -114,30 +114,44 @@ def test_attendee_email_adds_attendee_and_requests_send_updates(monkeypatch):
     assert params == {"sendUpdates": "all"}  # a query param, not a body field
 
 
-def test_busy_periods_parses_the_freebusy_response(monkeypatch):
+def test_busy_periods_reads_events_list_within_the_booking_scope(monkeypatch):
+    # Availability uses events.list (calendar.events scope), NOT freeBusy (which needs a
+    # broader scope than we request) — so one consent covers both booking and lookup.
     import httpx
 
     calls = []
 
-    def fake_post(url, json, headers, timeout):
-        calls.append((url, json))
+    def fake_get(url, params, headers, timeout):
+        calls.append((url, params, headers))
         return _Resp(
             200,
             {
-                "calendars": {
-                    "primary": {
-                        "busy": [
-                            {
-                                "start": "2026-07-10T10:00:00+00:00",
-                                "end": "2026-07-10T10:30:00+00:00",
-                            }
-                        ]
-                    }
-                }
+                "items": [
+                    {
+                        "status": "confirmed",
+                        "start": {"dateTime": "2026-07-10T10:00:00+00:00"},
+                        "end": {"dateTime": "2026-07-10T10:30:00+00:00"},
+                    },
+                    # marked "free" -> not a conflict
+                    {
+                        "status": "confirmed",
+                        "transparency": "transparent",
+                        "start": {"dateTime": "2026-07-10T12:00:00+00:00"},
+                        "end": {"dateTime": "2026-07-10T13:00:00+00:00"},
+                    },
+                    # cancelled -> skipped
+                    {
+                        "status": "cancelled",
+                        "start": {"dateTime": "2026-07-10T14:00:00+00:00"},
+                        "end": {"dateTime": "2026-07-10T15:00:00+00:00"},
+                    },
+                    # all-day (date only) -> not a timed conflict
+                    {"status": "confirmed", "start": {"date": "2026-07-10"}, "end": {"date": "2026-07-11"}},
+                ]
             },
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(httpx, "get", fake_get)
     client = GoogleCalendarClient()
     start = datetime(2026, 7, 10, 8, tzinfo=timezone.utc)
     end = datetime(2026, 7, 10, 18, tzinfo=timezone.utc)
@@ -149,10 +163,11 @@ def test_busy_periods_parses_the_freebusy_response(monkeypatch):
             datetime(2026, 7, 10, 10, 30, tzinfo=timezone.utc),
         )
     ]
-    [(url, body)] = calls
-    assert url == "https://www.googleapis.com/calendar/v3/freeBusy"
-    assert body["items"] == [{"id": "primary"}]
-    assert body["timeMin"] == start.isoformat()
+    [(url, params, headers)] = calls
+    assert url == "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+    assert params["timeMin"] == start.isoformat()
+    assert params["singleEvents"] == "true"
+    assert headers["Authorization"] == "Bearer tok"
 
 
 def test_busy_periods_missing_access_token_is_a_provider_error():

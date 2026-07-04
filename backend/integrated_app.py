@@ -84,6 +84,16 @@ from backend.static_site import mount_frontend
 
 log = logging.getLogger("voice_agent_studio.integrated")
 
+# Send our own loggers to stdout. uvicorn only configures its own loggers, leaving the
+# root without a handler — so application logs (tool failures, capability sync, provider
+# errors) fell through to the WARNING-only last-resort handler, which is why real errors
+# were invisible in the deploy logs. Honor LOG_LEVEL (default INFO). basicConfig is a
+# no-op if the root already has handlers, so it won't fight a host that configured them.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
 
 def build_app() -> FastAPI:
     # Real accounts: one session store + one dependency, shared by every workstream's

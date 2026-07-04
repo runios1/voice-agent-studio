@@ -31,11 +31,15 @@ from typing import Optional, Protocol
 
 log = logging.getLogger("voice_agent_studio.integration.capability_sync")
 
-# provider id (see backend/tool_registry/catalog.py) -> the capability flag it gates.
-PROVIDER_TO_FLAG: dict[str, str] = {
-    "google_calendar": "automation.calendar.enabled",
-    "gmail": "automation.email.enabled",
-}
+# The providers whose connection unlocks a capability (see backend/tool_registry/catalog.py).
+KNOWN_PROVIDERS = ("google_calendar", "gmail")
+
+# Seeded into automation.email.template_ids when a tenant enables email but has no
+# templates yet — otherwise "enabled email" still can't send (the confirmation resolves
+# to no template). Must exist in the email client's catalog (see resend_email.py /
+# providers.build_email_client). `booking_confirmation` has no links, so it clears the
+# link allowlist with no per-agent domain config.
+DEFAULT_EMAIL_TEMPLATE_IDS = ["booking_confirmation"]
 
 
 class _Connections(Protocol):
@@ -48,13 +52,22 @@ class _Service(Protocol):
     def apply_patch(self, agent_id: str, owner_user_id: str, path: str, value, expected_version=None): ...
 
 
-def _flag_value(config, flag: str) -> bool:
-    """Read a dotted automation flag off a config object (attribute walk, not model_dump
-    — cheaper and the paths are fixed)."""
-    cur = config
-    for part in flag.split("."):
-        cur = getattr(cur, part)
-    return bool(cur)
+def _needed_patches(provider: str, config) -> list[tuple[str, object]]:
+    """The (path, value) patches that make `provider`'s capability enabled AND usable on
+    this config — empty if it's already fully set up. Enabling email also seeds a default
+    template so the capability can actually send, not just claim to."""
+    patches: list[tuple[str, object]] = []
+    if provider == "google_calendar":
+        if not config.automation.calendar.enabled:
+            patches.append(("automation.calendar.enabled", True))
+    elif provider == "gmail":
+        if not config.automation.email.enabled:
+            patches.append(("automation.email.enabled", True))
+        if not config.automation.email.template_ids:
+            patches.append(
+                ("automation.email.template_ids", list(DEFAULT_EMAIL_TEMPLATE_IDS))
+            )
+    return patches
 
 
 def enable_connected_capabilities(
@@ -71,10 +84,9 @@ def enable_connected_capabilities(
     exactly what was just linked); omitted reconciles every known provider (used at
     login). Never raises: a hiccup enabling one agent must not fail the login/connect.
     """
-    providers = [provider] if provider is not None else list(PROVIDER_TO_FLAG)
+    providers = [provider] if provider is not None else list(KNOWN_PROVIDERS)
     for prov in providers:
-        flag = PROVIDER_TO_FLAG.get(prov)
-        if flag is None:
+        if prov not in KNOWN_PROVIDERS:
             continue
         # Capability follows connection: nothing to enable if it isn't connected.
         if connections.for_provider(tenant_id, prov) is None:
@@ -87,13 +99,12 @@ def enable_connected_capabilities(
         for meta in agents:
             try:
                 config = service.get_agent(meta.id, tenant_id)
-                if _flag_value(config, flag):
-                    continue  # already on — idempotent
-                service.apply_patch(meta.id, tenant_id, flag, True)
-                log.info("capability_sync: enabled %s on agent %s", flag, meta.id)
+                for path, value in _needed_patches(prov, config):
+                    service.apply_patch(meta.id, tenant_id, path, value)
+                    log.info("capability_sync: set %s on agent %s", path, meta.id)
             except Exception:
                 # One agent failing (locked/validation/not-found race) must not break
                 # the whole reconcile or the login/connect it rides on.
                 log.exception(
-                    "capability_sync: failed to enable %s on agent %s", flag, meta.id
+                    "capability_sync: failed to reconcile %s on agent %s", prov, meta.id
                 )

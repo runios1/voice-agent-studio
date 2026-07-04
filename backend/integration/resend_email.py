@@ -68,6 +68,19 @@ class SentEmail:
 # Stand-in platform template store (see module docstring) — real copy only, the model
 # never writes to these.
 _DEFAULT_TEMPLATES: dict[str, EmailTemplate] = {
+    # The default a booked meeting auto-confirms with — no links, so it clears the
+    # allowlist screen with no per-agent domain config (this is what `capability_sync`
+    # seeds into automation.email.template_ids when a tenant enables email).
+    "booking_confirmation": EmailTemplate(
+        template_id="booking_confirmation",
+        subject="Your meeting is confirmed",
+        body=(
+            "Hi,\n\nThanks for your time today — this confirms the meeting we just "
+            "scheduled. You'll also receive a calendar invite separately.\n\nLooking "
+            "forward to it,\nThe team"
+        ),
+        links=[],
+    ),
     "intro": EmailTemplate(
         template_id="intro",
         subject="Great speaking with you",
