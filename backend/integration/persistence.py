@@ -5,8 +5,11 @@ as its in-memory reference and lazily imports its driver, so selection is a pure
 factory choice with no code path change downstream (the whole point of the frozen
 repository seams).
 
-Set `DATABASE_URL` to a libpq connection string to persist to Postgres instead;
-set `VAS_IN_MEMORY=true` for a zero-dependency ephemeral boot (tests/CI only —
+Set `DATABASE_URL` to a libpq connection string to persist to Postgres instead
+(e.g. a free Supabase project — see `docs/supabase-setup.md`); each factory runs
+its store's idempotent `init_schema()` (CREATE TABLE IF NOT EXISTS) at boot, so
+pointing at an empty database just works — no manual migration step. Set
+`VAS_IN_MEMORY=true` for a zero-dependency ephemeral boot (tests/CI only —
 nothing survives a restart).
 """
 
@@ -47,8 +50,10 @@ def build_config_repository():
     if dsn:
         from backend.config_gate.postgres_repository import PostgresConfigRepository
 
+        repo = PostgresConfigRepository(dsn)
+        repo.init_schema()  # idempotent CREATE TABLE IF NOT EXISTS — bootstraps a fresh DB
         log.info("config: Postgres repository")
-        return PostgresConfigRepository(dsn)
+        return repo
     from backend.config_gate.sqlite_repository import SQLiteConfigRepository
 
     log.info("config: SQLite repository")
@@ -66,6 +71,7 @@ def build_event_service():
         from backend.events.postgres_store import PostgresEventStore, PostgresListenBus
 
         store = PostgresEventStore(dsn)
+        store.init_schema()  # idempotent — creates events table + NOTIFY trigger on a fresh DB
         log.info("events: Postgres store + LISTEN/NOTIFY bus")
         return EventService(store=store, bus=PostgresListenBus(store))
     from backend.events.sqlite_store import SQLiteEventStore
@@ -84,8 +90,10 @@ def build_orchestrator_repository():
     if dsn:
         from backend.orchestrator.postgres_repository import PostgresOrchestratorRepository
 
+        repo = PostgresOrchestratorRepository(dsn)
+        repo.init_schema()  # idempotent — bootstraps per-lead campaign-state tables
         log.info("orchestrator: Postgres repository")
-        return PostgresOrchestratorRepository(dsn)
+        return repo
     from backend.orchestrator.sqlite_repository import SQLiteOrchestratorRepository
 
     log.info("orchestrator: SQLite repository")
@@ -102,8 +110,10 @@ def build_auth_store():
     if dsn:
         from backend.auth.postgres_store import PostgresAuthStore
 
+        store = PostgresAuthStore(dsn)
+        store.init_schema()  # idempotent — bootstraps users + sessions tables
         log.info("auth: Postgres store")
-        return PostgresAuthStore(dsn)
+        return store
     from backend.auth.sqlite_store import SQLiteAuthStore
 
     log.info("auth: SQLite store")

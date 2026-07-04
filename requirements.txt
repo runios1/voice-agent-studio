@@ -35,8 +35,9 @@ pytest-asyncio>=0.23
 # --- Optional / lazily imported — install only when the matching env var is set ---
 # Postgres persistence (DATABASE_URL) — backend/config_gate/postgres_repository.py,
 # backend/orchestrator/postgres_repository.py, backend/events/postgres_store.py,
-# backend/integration/persistence.py. Unset DATABASE_URL runs fully in-memory.
-# psycopg[binary]>=3.1
+# backend/integration/persistence.py. Unset DATABASE_URL falls back to SQLite.
+# Works against any libpq Postgres, incl. a free Supabase project (docs/supabase-setup.md).
+psycopg[binary]>=3.1
 
 # Real outbound calling (RETELL_API_KEY) — backend/voice_runtime/transports.py
 # (RetellTransport, P3-3) imports BOTH lazily. Unset RETELL_API_KEY runs on
