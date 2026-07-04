@@ -58,6 +58,7 @@ from backend.auth.router import create_router as create_auth_router
 from backend.auth.session import build_current_user_dependency
 from backend.integration.auth_wiring import build_google_login_provider
 
+from backend.integration.capability_sync import enable_connected_capabilities
 from backend.integration.config_source import AgentServiceConfigSource
 from backend.integration.dialer import RealDialer
 from backend.integration.runtime import (
@@ -135,6 +136,20 @@ def build_app() -> FastAPI:
     oauth_redirect_base = os.getenv("OAUTH_REDIRECT_BASE_URL") or render_url or "http://localhost:8000"
     app_base_url = os.getenv("APP_BASE_URL") or render_url or "http://localhost:5173"
 
+    # Capability follows connection: linking a provider (calendar/email) enables that
+    # capability on the tenant's agents, so a user who connects their calendar can
+    # actually book — no hidden per-agent flag to hunt for. `on_connected` handles a
+    # fresh OAuth link; the login reconcile self-heals agents built before this and
+    # covers the platform-level email connection (seeded at login, not via a click).
+    def _sync_connected_capabilities(tenant_id: str, provider: str | None = None) -> None:
+        enable_connected_capabilities(
+            service, tool_stack.connections, tenant_id, provider=provider
+        )
+
+    def _on_login(tenant_id: str) -> None:
+        tool_stack.ensure_dev_connections(tenant_id)
+        _sync_connected_capabilities(tenant_id)
+
     app.include_router(create_orch_router(orch), prefix="/api")
     app.include_router(create_events_router(events), prefix="/api")
     app.include_router(
@@ -143,6 +158,9 @@ def build_app() -> FastAPI:
             tool_stack.connections,
             redirect_uri=f"{oauth_redirect_base}/api/oauth/callback",
             app_redirect_url=app_base_url,
+            on_connected=lambda tenant, provider: _sync_connected_capabilities(
+                tenant, provider
+            ),
         ),
         prefix="/api",
     )
@@ -152,10 +170,10 @@ def build_app() -> FastAPI:
             build_google_login_provider(),
             redirect_uri=f"{oauth_redirect_base}/api/auth/google/callback",
             app_redirect_url=app_base_url,
-            # Dev convenience for a BRAND NEW real user: seed placeholder tool
-            # connections so mock calendar/email handlers run with no manual
-            # connect step (no-op once real providers are configured/connected).
-            on_login=tool_stack.ensure_dev_connections,
+            # On login: seed placeholder tool connections (dev convenience, no-op once
+            # real providers are connected) THEN enable any already-connected
+            # capability on the user's agents (self-heals pre-existing agents).
+            on_login=_on_login,
         ),
         prefix="/api",
     )

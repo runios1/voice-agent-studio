@@ -19,7 +19,8 @@ from a client-supplied id — and then 302s back into the app.
 
 from __future__ import annotations
 
-from typing import Optional
+import logging
+from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -32,6 +33,8 @@ from contracts.connections_http.schema import (
 from backend.tool_registry.catalog import CALENDAR_SCOPES, EMAIL_SCOPES, GMAIL, GOOGLE_CALENDAR
 from backend.tool_registry.connections import ConnectionManager, ConnectionStore
 from backend.tool_registry.errors import ProviderError, ToolError
+
+log = logging.getLogger("voice_agent_studio.tool_registry.connections_router")
 
 # The connectable provider catalog, id -> the scopes `begin_connect` requests.
 # Matches the least-privilege scopes the tool catalog already declares.
@@ -69,10 +72,17 @@ def create_router(
     *,
     redirect_uri: str,
     app_redirect_url: str = "/",
+    on_connected: Optional[Callable[[str, str], None]] = None,
 ) -> APIRouter:
     """`redirect_uri` is the backend's OWN callback URL (must match what's registered
     with the provider); `app_redirect_url` is where the browser bounces back to in the
-    app once the callback has run (frontend origin)."""
+    app once the callback has run (frontend origin).
+
+    `on_connected(tenant_id, provider)` fires after a successful connect — the
+    integrator uses it to enable the capability the connection just unlocked (calendar/
+    email) on the tenant's agents (`capability follows connection`). Best-effort: a
+    raising hook must not fail the connect, so it's swallowed and the browser still
+    bounces back `connected=ok`."""
     router = APIRouter()
 
     @router.get("/connections")
@@ -92,9 +102,14 @@ def create_router(
         # Tenant + provider come from the state ConnectionManager pinned at
         # begin_connect — never trusted from this request (D-security).
         try:
-            await manager.complete_connect(state, code)
+            conn = await manager.complete_connect(state, code)
         except ToolError:
             return RedirectResponse(url=f"{app_redirect_url}?connected=error")
+        if on_connected is not None:
+            try:
+                on_connected(conn.tenant_id, conn.provider)
+            except Exception:  # a convenience hook must never break the connect
+                log.exception("on_connected hook failed for %s/%s", conn.tenant_id, conn.provider)
         return RedirectResponse(url=f"{app_redirect_url}?connected=ok")
 
     @router.delete("/connections/{provider}")
@@ -119,13 +134,18 @@ def create_app(
     *,
     redirect_uri: str = "http://localhost:8000/api/oauth/callback",
     app_redirect_url: str = "/",
+    on_connected: Optional[Callable[[str, str], None]] = None,
 ) -> FastAPI:
     """Standalone app factory (dev/tests). Production mounts `create_router` into the
     one app and injects the real session dep for `current_tenant`."""
     app = FastAPI(title="voice-agent-studio — connections")
     app.include_router(
         create_router(
-            manager, store, redirect_uri=redirect_uri, app_redirect_url=app_redirect_url
+            manager,
+            store,
+            redirect_uri=redirect_uri,
+            app_redirect_url=app_redirect_url,
+            on_connected=on_connected,
         ),
         prefix="/api",
     )

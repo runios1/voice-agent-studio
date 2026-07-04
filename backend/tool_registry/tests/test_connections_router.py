@@ -82,6 +82,44 @@ def test_full_connect_flow_then_list_shows_connected(client):
     assert entry["connection_ref"]  # opaque ref present, never the token itself
 
 
+def test_successful_connect_fires_on_connected_hook_with_tenant_and_provider(manager, store):
+    fired: list[tuple[str, str]] = []
+    client = TestClient(
+        create_app(
+            manager,
+            store,
+            app_redirect_url="https://app.test/",
+            on_connected=lambda tenant, provider: fired.append((tenant, provider)),
+        )
+    )
+    auth_url = client.post(f"/api/connections/{CALENDAR_PROVIDER}/authorize", headers=H).json()[
+        "authorization_url"
+    ]
+    state = parse_qs(urlparse(auth_url).query)["state"][0]
+    client.get("/api/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False)
+
+    assert fired == [(TENANT, CALENDAR_PROVIDER)]
+
+
+def test_a_raising_on_connected_hook_never_breaks_the_connect(manager, store):
+    def boom(tenant, provider):
+        raise RuntimeError("downstream blew up")
+
+    client = TestClient(
+        create_app(manager, store, app_redirect_url="https://app.test/", on_connected=boom)
+    )
+    auth_url = client.post(f"/api/connections/{CALENDAR_PROVIDER}/authorize", headers=H).json()[
+        "authorization_url"
+    ]
+    state = parse_qs(urlparse(auth_url).query)["state"][0]
+    cb = client.get(
+        "/api/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
+    )
+    # the connect still succeeds; the hook failure is swallowed
+    assert cb.status_code in (302, 307)
+    assert "connected=ok" in cb.headers["location"]
+
+
 def test_callback_with_bad_state_redirects_with_error(client):
     cb = client.get(
         "/api/oauth/callback",
