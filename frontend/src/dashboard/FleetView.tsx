@@ -77,7 +77,7 @@ export function FleetView() {
                       <CampaignStateBadge state={c.state} />
                     </td>
                     <td className="py-2 tabular-nums">{live}</td>
-                    <td className="py-2 text-xs text-amber-700">
+                    <td className="py-2 text-xs text-amber-600 dark:text-amber-300">
                       {c.autopause_reason ?? ""}
                     </td>
                     <td className="py-2 text-right">

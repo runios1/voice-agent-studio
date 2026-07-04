@@ -46,7 +46,10 @@ export function CampaignView() {
           <h2 className="text-sm font-semibold">{campaign.name}</h2>
           <CampaignStateBadge state={campaign.state} />
           {trips > 0 && (
-            <span className="text-xs text-amber-700" data-testid="trip-count">
+            <span
+              className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+              data-testid="trip-count"
+            >
               {trips} guardrail {trips === 1 ? "trip" : "trips"}
             </span>
           )}
@@ -73,7 +76,7 @@ export function CampaignView() {
       {campaign.autopause_reason && (
         <div
           data-testid="autopause-banner"
-          className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-sm text-amber-800"
+          className="border-b border-amber-500/20 bg-amber-500/10 px-5 py-2 text-sm text-amber-700 dark:text-amber-300"
         >
           Auto-paused: {campaign.autopause_reason}
         </div>
@@ -106,11 +109,16 @@ export function CampaignView() {
           <ProgressBar value={progress(leads)} />
           <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
             {(Object.keys(counts) as (keyof typeof counts)[]).map((k) => (
-              <div key={k} className="rounded-md bg-panel px-2 py-1">
+              <div
+                key={k}
+                className="rounded-lg border border-line bg-surface px-3 py-2 shadow-card"
+              >
                 <dt className="text-xs capitalize text-muted">
                   {k.replace("_", " ")}
                 </dt>
-                <dd className="tabular-nums">{counts[k]}</dd>
+                <dd className="text-lg font-semibold tabular-nums text-ink">
+                  {counts[k]}
+                </dd>
               </div>
             ))}
           </dl>
@@ -125,9 +133,12 @@ export function CampaignView() {
           ) : (
             <dl className="grid grid-cols-2 gap-2 text-sm">
               {Object.entries(outcomes).map(([k, n]) => (
-                <div key={k} className="rounded-md bg-panel px-2 py-1">
+                <div
+                  key={k}
+                  className="rounded-lg border border-line bg-surface px-3 py-2 shadow-card"
+                >
                   <dt className="text-xs capitalize text-muted">{k}</dt>
-                  <dd className="tabular-nums">{n}</dd>
+                  <dd className="text-lg font-semibold tabular-nums text-ink">{n}</dd>
                 </div>
               ))}
             </dl>
@@ -190,8 +201,10 @@ function SubTab({
       data-testid={testid}
       onClick={onClick}
       className={clsx(
-        "rounded-md px-3 py-1 text-sm",
-        active ? "bg-panel font-medium text-ink" : "text-muted hover:text-ink",
+        "rounded-full px-4 py-1 text-sm transition-all",
+        active
+          ? "bg-surface font-semibold text-ink shadow-card"
+          : "text-muted hover:text-ink",
       )}
     >
       {children}

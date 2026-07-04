@@ -9,7 +9,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import type { AnswerStatus, LeadRecord } from "./metrics";
 import { EventFeed } from "./EventFeed";
-import { LeadStateBadge } from "./ui";
+import { LeadStateBadge, TONE } from "./ui";
 
 type AnswerFilter = "all" | "answered" | "unanswered" | "not_dialed";
 type OutcomeFilter = "all" | "qualified" | "not_qualified" | "unknown";
@@ -87,7 +87,7 @@ export function CallDetailsTable({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name or number…"
-            className="w-56 rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+            className="w-56 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
           />
           <SelectFilter
             testid="answer-filter"
@@ -216,7 +216,10 @@ function LeadRow({
         </Td>
         <Td>
           {r.booking ? (
-            <span className="text-emerald-700" data-testid={`meeting-${r.lead.id}`}>
+            <span
+              className="text-emerald-600 dark:text-emerald-400"
+              data-testid={`meeting-${r.lead.id}`}
+            >
               📅 {formatWhen(r.booking.start)}
             </span>
           ) : (
@@ -265,7 +268,7 @@ function LeadDetail({
   if (r.booking) {
     facts.push([
       "Meeting booked",
-      <span className="text-emerald-700">
+      <span className="text-emerald-600 dark:text-emerald-400">
         {formatWhen(r.booking.start, true)}
         {r.booking.end ? ` – ${formatWhen(r.booking.end)}` : ""}
       </span>,
@@ -287,7 +290,7 @@ function LeadDetail({
   if (r.guardrailTrips > 0)
     facts.push([
       "Guardrail trips",
-      <span className="text-amber-700">{r.guardrailTrips}</span>,
+      <span className="text-amber-600 dark:text-amber-300">{r.guardrailTrips}</span>,
     ]);
 
   return (
@@ -338,12 +341,14 @@ function Stat({
   tone?: "emerald";
 }) {
   return (
-    <div className="rounded-md bg-panel px-2 py-1">
+    <div className="rounded-lg border border-line bg-surface px-3 py-2 shadow-card">
       <div className="text-xs text-muted">{label}</div>
       <div
         className={clsx(
-          "tabular-nums",
-          tone === "emerald" && value > 0 && "font-semibold text-emerald-700",
+          "text-lg font-semibold tabular-nums",
+          tone === "emerald" && value > 0
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-ink",
         )}
       >
         {value}
@@ -353,12 +358,12 @@ function Stat({
 }
 
 const ANSWER_TONE: Record<AnswerStatus, string> = {
-  answered: "bg-emerald-100 text-emerald-800",
-  in_progress: "bg-sky-100 text-sky-800",
-  voicemail: "bg-amber-100 text-amber-800",
-  no_answer: "bg-slate-200 text-slate-600",
-  failed: "bg-red-100 text-red-700",
-  not_dialed: "bg-line text-muted",
+  answered: TONE.success,
+  in_progress: TONE.info,
+  voicemail: TONE.warning,
+  no_answer: TONE.neutral,
+  failed: TONE.danger,
+  not_dialed: TONE.neutral,
 };
 
 export function answerLabel(a: AnswerStatus): string {
@@ -401,13 +406,13 @@ function QualifiedBadge({
 }) {
   if (qualified === true)
     return (
-      <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+      <span className={clsx("inline-block rounded-full px-2 py-0.5 text-xs font-medium", TONE.success)}>
         Qualified
       </span>
     );
   if (qualified === false)
     return (
-      <span className="inline-block rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+      <span className={clsx("inline-block rounded-full px-2 py-0.5 text-xs font-medium", TONE.neutral)}>
         {outcome === "do_not_call" || outcome === "opted_out" ? "Do not call" : "Not qualified"}
       </span>
     );
@@ -430,7 +435,7 @@ function SelectFilter({
       data-testid={testid}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+      className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
     >
       {options.map(([v, label]) => (
         <option key={v} value={v}>

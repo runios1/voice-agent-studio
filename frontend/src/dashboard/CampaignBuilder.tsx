@@ -134,7 +134,7 @@ export function CampaignBuilder() {
         </button>
       </div>
 
-      {agentsError && <p className="px-5 pt-3 text-sm text-red-700">{agentsError}</p>}
+      {agentsError && <p className="px-5 pt-3 text-sm text-red-600 dark:text-red-300">{agentsError}</p>}
 
       {step === "setup" && (
         <section className="space-y-4 px-5 py-4">
@@ -153,7 +153,7 @@ export function CampaignBuilder() {
                 data-testid="agent-select"
                 value={agentId}
                 onChange={(e) => setAgentId(e.target.value)}
-                className="w-full rounded-md border border-line bg-canvas px-3 py-2 text-sm"
+                className="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm"
               >
                 <option value="" disabled>
                   Choose an agent…
@@ -166,7 +166,7 @@ export function CampaignBuilder() {
               </select>
             )}
             {selectedAgent && selectedAgent.status !== "ready" && (
-              <p className="mt-1 text-xs text-amber-700">
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-300">
                 This agent isn't deploy-ready yet — finish building it in the studio
                 first.
               </p>
@@ -182,7 +182,7 @@ export function CampaignBuilder() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. West-coast SaaS Q3"
-              className="w-full rounded-md border border-line bg-canvas px-3 py-2 text-sm"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm"
             />
           </div>
 
@@ -190,7 +190,7 @@ export function CampaignBuilder() {
             data-testid="next-to-leads"
             disabled={!canProceedSetup}
             onClick={() => setStep("leads")}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="btn-primary rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             Next: add leads
           </button>
@@ -201,7 +201,7 @@ export function CampaignBuilder() {
         <section className="space-y-5 px-5 py-4">
           <div
             data-testid="trial-verification-notice"
-            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+            className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
           >
             <p className="font-semibold">⚠️ Demo on a Twilio trial account</p>
             <p className="mt-1">
@@ -228,7 +228,7 @@ export function CampaignBuilder() {
                   value={phoneInput}
                   onChange={(e) => setPhoneInput(e.target.value)}
                   placeholder="+1 555 000 1234"
-                  className="rounded-md border border-line bg-canvas px-3 py-1.5 text-sm"
+                  className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
                 />
               </div>
               <div>
@@ -238,18 +238,18 @@ export function CampaignBuilder() {
                   value={nameInput}
                   onChange={(e) => setNameInput(e.target.value)}
                   placeholder="Ada Lovelace"
-                  className="rounded-md border border-line bg-canvas px-3 py-1.5 text-sm"
+                  className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
                 />
               </div>
               <button
                 data-testid="add-lead"
                 onClick={addLead}
-                className="rounded-md border border-line bg-canvas px-3 py-1.5 text-sm font-medium hover:bg-panel"
+                className="rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-panel"
               >
                 + Add
               </button>
             </div>
-            {addError && <p className="mt-1 text-xs text-red-700">{addError}</p>}
+            {addError && <p className="mt-1 text-xs text-red-600 dark:text-red-300">{addError}</p>}
           </div>
 
           <div>
@@ -273,20 +273,20 @@ export function CampaignBuilder() {
               onChange={(e) => setCsvText(e.target.value)}
               placeholder={"+15550001234, Ada Lovelace\n+15550005678, Grace Hopper"}
               rows={4}
-              className="w-full rounded-md border border-line bg-canvas px-3 py-2 font-mono text-xs"
+              className="w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-xs"
             />
             <button
               data-testid="import-csv"
               disabled={!csvText.trim()}
               onClick={importCsv}
-              className="mt-2 rounded-md border border-line bg-canvas px-3 py-1.5 text-sm font-medium hover:bg-panel disabled:opacity-50"
+              className="mt-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-panel disabled:opacity-50"
             >
               Parse &amp; add
             </button>
             {invalidRows.length > 0 && (
               <div
                 data-testid="invalid-rows"
-                className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                className="mt-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
               >
                 {invalidRows.length} row{invalidRows.length === 1 ? "" : "s"} skipped:
                 <ul className="mt-1 list-disc pl-4">
@@ -320,7 +320,7 @@ export function CampaignBuilder() {
                     <button
                       data-testid={`remove-lead-${l.phone}`}
                       onClick={() => removeLead(l.phone)}
-                      className="text-xs text-muted hover:text-red-700"
+                      className="text-xs text-muted hover:text-red-600 dark:hover:text-red-300"
                     >
                       Remove
                     </button>
@@ -333,7 +333,7 @@ export function CampaignBuilder() {
           <div className="flex gap-2">
             <button
               onClick={() => setStep("setup")}
-              className="rounded-md border border-line bg-canvas px-4 py-2 text-sm font-medium hover:bg-panel"
+              className="rounded-md border border-line bg-surface px-4 py-2 text-sm font-medium hover:bg-panel"
             >
               Back
             </button>
@@ -341,7 +341,7 @@ export function CampaignBuilder() {
               data-testid="next-to-review"
               disabled={leads.length === 0}
               onClick={() => setStep("review")}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="btn-primary rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
             >
               Next: review &amp; authorize
             </button>
@@ -404,7 +404,7 @@ export function CampaignBuilder() {
             )}
           </div>
 
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
             Authorizing starts calling these {leads.length} leads right away, within
             the guardrails above and the platform's locked compliance rules — the
             agent then runs unsupervised until paused.
@@ -420,13 +420,13 @@ export function CampaignBuilder() {
             </label>
           </div>
 
-          {submitError && <p className="text-sm text-red-700">{submitError}</p>}
+          {submitError && <p className="text-sm text-red-600 dark:text-red-300">{submitError}</p>}
 
           <div className="flex gap-2">
             <button
               onClick={() => setStep("leads")}
               disabled={submitting}
-              className="rounded-md border border-line bg-canvas px-4 py-2 text-sm font-medium hover:bg-panel disabled:opacity-50"
+              className="rounded-md border border-line bg-surface px-4 py-2 text-sm font-medium hover:bg-panel disabled:opacity-50"
             >
               Back
             </button>
@@ -479,7 +479,7 @@ function EnvelopeField({
         type="number"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-1 w-full rounded-md border border-line bg-canvas px-2 py-1 text-sm text-ink"
+        className="mt-1 w-full rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink"
       />
     </label>
   );

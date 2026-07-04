@@ -31,7 +31,7 @@ export function LiveCallView() {
           <span
             className={
               ended
-                ? "h-2 w-2 rounded-full bg-slate-400"
+                ? "h-2 w-2 rounded-full bg-muted"
                 : "h-2 w-2 animate-pulse rounded-full bg-emerald-500"
             }
           />
@@ -44,7 +44,7 @@ export function LiveCallView() {
           </span>
           {disclosed && (
             <span
-              className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700"
+              className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300"
               data-testid="disclosure-ok"
             >
               ✓ disclosed

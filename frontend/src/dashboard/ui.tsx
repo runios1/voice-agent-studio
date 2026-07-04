@@ -3,11 +3,21 @@
 import clsx from "clsx";
 import type { CampaignState, EventType, LeadState, Severity } from "./types";
 
+/** Semantic status tints, theme-aware (readable in light AND dark). Shared so every
+ *  badge/pill across the dashboard speaks the same color language. */
+export const TONE = {
+  success: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  warning: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  danger: "bg-red-500/15 text-red-600 dark:text-red-300",
+  info: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+  neutral: "bg-line text-muted",
+} as const;
+
 const CAMPAIGN_TONE: Record<CampaignState, string> = {
-  draft: "bg-line text-muted",
-  running: "bg-emerald-100 text-emerald-800",
-  paused: "bg-amber-100 text-amber-800",
-  completed: "bg-slate-200 text-slate-700",
+  draft: TONE.neutral,
+  running: TONE.success,
+  paused: TONE.warning,
+  completed: TONE.neutral,
 };
 
 export function CampaignStateBadge({ state }: { state: CampaignState }) {
@@ -33,7 +43,7 @@ export function LeadStateBadge({ state }: { state: LeadState }) {
 }
 
 const SEVERITY_TONE: Record<Severity, string> = {
-  info: "bg-slate-300",
+  info: "bg-muted/60",
   warning: "bg-amber-400",
   critical: "bg-red-500",
 };
@@ -96,10 +106,10 @@ export function ControlButton({
       onClick={onClick}
       disabled={disabled || pending}
       className={clsx(
-        "rounded-md px-3 py-1 text-sm font-medium transition disabled:opacity-50",
+        "rounded-lg px-3 py-1.5 text-sm font-medium shadow-card transition disabled:opacity-50",
         danger
           ? "bg-red-600 text-white hover:bg-red-700"
-          : "border border-line bg-canvas text-ink hover:bg-panel",
+          : "border border-line bg-surface text-ink hover:bg-panel",
       )}
     >
       {pending ? "…" : children}
@@ -122,8 +132,12 @@ export function ProgressBar({ value }: { value: number }) {
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-line">
       <div
-        className="h-full rounded-full bg-accent transition-all"
-        style={{ width: `${pct}%` }}
+        className="h-full rounded-full transition-all"
+        style={{
+          width: `${pct}%`,
+          backgroundImage:
+            "linear-gradient(90deg, rgb(var(--c-accent)), rgb(var(--c-signal)))",
+        }}
         role="progressbar"
         aria-valuenow={pct}
         aria-valuemin={0}

@@ -16,6 +16,8 @@ import { LiveCallView } from "./LiveCallView";
 import { AuditView } from "./AuditView";
 import { ConnectionsView } from "../connections/ConnectionsView";
 import type { ConnectionsApi } from "../connections/connectionsApi";
+import { Logomark } from "../components/Brand";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export function DashboardApp({
   api,
@@ -52,9 +54,14 @@ export function DashboardApp({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-line px-4 py-2">
-        <span className="text-sm font-semibold">Operations dashboard</span>
-        <nav className="flex gap-1">
+      <header className="glass sticky top-0 z-10 flex items-center gap-4 border-b border-line/70 px-4 py-2.5">
+        <span className="flex items-center gap-2.5">
+          <Logomark className="h-8 w-8" />
+          <span className="font-display text-[15px] font-semibold tracking-tight text-ink">
+            Operations
+          </span>
+        </span>
+        <nav className="ml-2 flex gap-1 rounded-full border border-line/70 bg-panel/60 p-1">
           <TabButton active={onFleetSide} onClick={openFleet}>
             Fleet
           </TabButton>
@@ -65,22 +72,29 @@ export function DashboardApp({
             Audit
           </TabButton>
         </nav>
-        {/* Link back to the builder studio (separate entry/root). */}
-        <a href="/" className="text-sm text-muted hover:text-ink">
-          ← Agent studio
-        </a>
-        <span
-          data-testid="connection"
-          className="ml-auto flex items-center gap-1.5 text-xs text-muted"
-        >
+
+        <div className="ml-auto flex items-center gap-3">
           <span
-            className={clsx(
-              "h-2 w-2 rounded-full",
-              connected ? "bg-emerald-500" : "bg-slate-300",
-            )}
-          />
-          {connected ? "live" : "offline"}
-        </span>
+            data-testid="connection"
+            className="flex items-center gap-1.5 text-xs text-muted"
+          >
+            <span
+              className={clsx(
+                "h-2 w-2 rounded-full",
+                connected ? "bg-signal animate-pulse-ring" : "bg-muted/50",
+              )}
+            />
+            {connected ? "live" : "offline"}
+          </span>
+          {/* Link back to the builder studio (separate entry/root). */}
+          <a
+            href="/"
+            className="rounded-full px-3 py-1.5 text-sm text-muted transition-colors hover:bg-panel hover:text-ink"
+          >
+            ← Agent studio
+          </a>
+          <ThemeToggle />
+        </div>
       </header>
 
       {onFleetSide && (view === "campaign" || view === "live-call") && (
@@ -109,12 +123,15 @@ export function DashboardApp({
       )}
 
       {(loadError || controlError) && (
-        <div className="bg-red-50 px-4 py-2 text-sm text-red-700" role="alert">
+        <div
+          className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-600 dark:text-red-300"
+          role="alert"
+        >
           {controlError ?? loadError}
         </div>
       )}
 
-      <main className="min-h-0 flex-1">
+      <main className="min-h-0 flex-1 bg-canvas">
         {view === "fleet" && <FleetView />}
         {view === "new-campaign" && <CampaignBuilder />}
         {view === "campaign" && <CampaignView />}
@@ -139,8 +156,10 @@ function TabButton({
     <button
       onClick={onClick}
       className={clsx(
-        "rounded-md px-3 py-1 text-sm",
-        active ? "bg-panel font-medium text-ink" : "text-muted hover:text-ink",
+        "rounded-full px-4 py-1 text-sm transition-all",
+        active
+          ? "bg-surface font-semibold text-ink shadow-card"
+          : "text-muted hover:text-ink",
       )}
     >
       {children}

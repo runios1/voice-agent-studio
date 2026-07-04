@@ -77,7 +77,7 @@ export function ConnectionsView({
   }
 
   if (loadError) {
-    return <p className="p-6 text-sm text-red-700">{loadError}</p>;
+    return <p className="p-6 text-sm text-red-600 dark:text-red-300">{loadError}</p>;
   }
   if (!connections) {
     return <p className="p-6 text-sm text-muted">Loading connections…</p>;
@@ -95,7 +95,10 @@ export function ConnectionsView({
       </div>
 
       {actionError && (
-        <div className="bg-red-50 px-5 py-2 text-sm text-red-700" role="alert">
+        <div
+          className="bg-red-500/10 px-5 py-2 text-sm text-red-600 dark:text-red-300"
+          role="alert"
+        >
           {actionError}
         </div>
       )}
@@ -119,14 +122,14 @@ export function ConnectionsView({
                     className={clsx(
                       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
                       connected
-                        ? "bg-emerald-100 text-emerald-800"
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                         : "bg-line text-muted",
                     )}
                   >
                     <span
                       className={clsx(
                         "h-1.5 w-1.5 rounded-full",
-                        connected ? "bg-emerald-500" : "bg-slate-400",
+                        connected ? "bg-emerald-500" : "bg-muted",
                       )}
                     />
                     {connected ? "Connected" : "Not connected"}
@@ -138,7 +141,7 @@ export function ConnectionsView({
               {connected ? (
                 confirming === entry.id ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-amber-700">Disconnect?</span>
+                    <span className="text-xs text-amber-600 dark:text-amber-300">Disconnect?</span>
                     <button
                       data-testid={`confirm-disconnect-${entry.id}`}
                       disabled={busy}
@@ -158,7 +161,7 @@ export function ConnectionsView({
                   <button
                     data-testid={`disconnect-${entry.id}`}
                     onClick={() => setConfirming(entry.id)}
-                    className="rounded-md border border-line bg-canvas px-3 py-1 text-sm font-medium text-ink hover:bg-panel"
+                    className="rounded-lg border border-line bg-surface px-3 py-1 text-sm font-medium text-ink shadow-card hover:bg-panel"
                   >
                     Disconnect
                   </button>
@@ -168,7 +171,7 @@ export function ConnectionsView({
                   data-testid={`connect-${entry.id}`}
                   disabled={busy}
                   onClick={() => onConnect(entry.id)}
-                  className="rounded-md border border-line bg-canvas px-3 py-1 text-sm font-medium text-ink hover:bg-panel disabled:opacity-50"
+                  className="rounded-lg border border-line bg-surface px-3 py-1 text-sm font-medium text-ink shadow-card hover:bg-panel disabled:opacity-50"
                 >
                   {busy ? "…" : `Connect ${entry.label}`}
                 </button>

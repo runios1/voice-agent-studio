@@ -48,7 +48,7 @@ export function AuditView() {
 
         <select
           data-testid="filter-type"
-          className="rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
           value={typeSel}
           onChange={(e) => {
             const v = e.target.value as EventType | "";
@@ -66,7 +66,7 @@ export function AuditView() {
 
         <select
           data-testid="filter-severity"
-          className="rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
           value={filter.severity ?? ""}
           onChange={(e) =>
             apply({ severity: (e.target.value || undefined) as Severity | undefined })
@@ -83,7 +83,7 @@ export function AuditView() {
         <input
           data-testid="filter-campaign"
           placeholder="campaign id"
-          className="rounded-md border border-line bg-canvas px-2 py-1 text-sm"
+          className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
           defaultValue={filter.campaign_id ?? ""}
           onBlur={(e) => apply({ campaign_id: e.target.value || undefined })}
         />
