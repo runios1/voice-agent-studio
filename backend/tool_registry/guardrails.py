@@ -32,6 +32,22 @@ from backend.tool_registry.errors import GuardrailViolation
 # compliance. Real deliverability is the provider's problem, not a guardrail's.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# Reserved / documentation domains (RFC 2606 & 6761) — never real inboxes. A voice
+# model, asked to record an address it heard, will routinely substitute one of these
+# as a placeholder; sending a real lead's confirmation to `someone@example.com` is a
+# correctness/privacy bug, so we reject them structurally rather than hoping the prompt
+# holds. Matches the exact reserved second-level domains and the reserved TLDs.
+_RESERVED_EMAIL_DOMAINS = {"example.com", "example.org", "example.net", "example.edu"}
+_RESERVED_EMAIL_TLDS = {"test", "example", "invalid", "localhost"}
+
+
+def _is_placeholder_email_domain(domain: str) -> bool:
+    domain = domain.strip().lower().rstrip(".")
+    if domain in _RESERVED_EMAIL_DOMAINS:
+        return True
+    tld = domain.rsplit(".", 1)[-1] if "." in domain else domain
+    return tld in _RESERVED_EMAIL_TLDS
+
 
 @dataclass(frozen=True)
 class GuardrailPolicy:
@@ -142,6 +158,13 @@ def check_valid_email(value: str, policy: GuardrailPolicy, *, tool: str) -> None
     if not isinstance(value, str) or not _EMAIL_RE.match(value):
         raise GuardrailViolation(
             "That doesn't look like a valid email address.",
+            tool=tool,
+            param="attendee_email",
+        )
+    if _is_placeholder_email_domain(value.rsplit("@", 1)[-1]):
+        raise GuardrailViolation(
+            "That looks like a placeholder/example address, not the lead's real email. "
+            "Use the exact address they gave you.",
             tool=tool,
             param="attendee_email",
         )

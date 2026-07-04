@@ -83,6 +83,7 @@ class GoogleCalendarClient:
         start: datetime,
         length_minutes: int,
         attendee_email: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> CalendarBooking:
         if not access_token:
             raise ProviderError("Missing calendar credential.")
@@ -90,7 +91,11 @@ class GoogleCalendarClient:
         import httpx  # lazy: no network/SDK cost at import time (D8)
 
         end = start + timedelta(minutes=length_minutes)
-        body = {"start": _event_time(start), "end": _event_time(end)}
+        # A titled event reads far better than Google's "(no title)"/"Busy" default.
+        title = summary or (
+            f"Meeting with {attendee_email}" if attendee_email else "Meeting"
+        )
+        body = {"start": _event_time(start), "end": _event_time(end), "summary": title}
         url = _EVENTS_URL_TMPL.format(calendar_id=self._calendar_id)
         params = {}
         if attendee_email:

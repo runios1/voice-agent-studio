@@ -280,8 +280,10 @@ def _closing_directions(config: AgentConfig) -> str:
                 "automatically after the call — you do not send it yourself)."
             )
             lines.append(
-                "- If you have their email, pass it as attendee_email when you book "
-                "so the calendar invite reaches them directly, too."
+                "- Ask for their email and pass it as attendee_email when you book, so "
+                "the invite and confirmation reach them. Use the exact address they say "
+                "— confirm the spelling if unsure — and never substitute a placeholder "
+                "or example address; if you don't have a real one, omit it."
             )
         lines.append(
             "- If they're qualified but no time works right now, say a teammate "

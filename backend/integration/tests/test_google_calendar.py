@@ -73,8 +73,17 @@ def test_book_posts_start_end_and_returns_the_provider_event(monkeypatch):
     assert headers["Authorization"] == "Bearer tok-abc"
     assert body["start"]["dateTime"] == start.isoformat()
     assert "timeZone" not in body["start"]  # aware datetime — no zone override needed
+    assert body["summary"]  # a titled event, not Google's "(no title)"
     assert "attendees" not in body
     assert params == {}
+
+
+def test_event_gets_a_title_naming_the_attendee(monkeypatch):
+    bodies = []
+    _patch_post(monkeypatch, lambda url, json, headers, timeout, params=None: bodies.append(json) or _Resp(200, {"id": "e", "start": {}, "end": {}}))
+    client = GoogleCalendarClient()
+    client.book("tok", datetime(2026, 7, 10, 10, tzinfo=timezone.utc), 30, attendee_email="lead@acme.co")
+    assert bodies[0]["summary"] == "Meeting with lead@acme.co"
 
 
 def test_naive_start_gets_an_explicit_utc_timezone(monkeypatch):

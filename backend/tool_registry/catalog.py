@@ -63,8 +63,11 @@ CALENDAR_TOOL = RegistryTool(
             "attendee_email": {
                 "type": "string",
                 "description": (
-                    "The lead's email address, if they've given it to you this call — "
-                    "used only to invite them on the calendar event."
+                    "The lead's REAL email address, spelled exactly as they gave it to "
+                    "you on this call — used to invite them and to send their "
+                    "confirmation. Never invent, guess, or substitute a placeholder or "
+                    "example address (nothing @example.com). If you don't have their "
+                    "actual address, ask for it or omit this field — do not make one up."
                 ),
             },
         },

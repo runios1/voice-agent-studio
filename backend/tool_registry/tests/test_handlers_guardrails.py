@@ -116,11 +116,11 @@ async def test_attendee_email_is_validated_and_passed_to_the_client(
     reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
     result = await reg.execute(
         "calendar",
-        {"start_iso": _at(1, 15), "attendee_email": "lead@example.com"},
+        {"start_iso": _at(1, 15), "attendee_email": "lead@acme.co"},
         TENANT,
     )
-    assert result["attendee_email"] == "lead@example.com"
-    assert calendar_client.booked[0].attendee_email == "lead@example.com"
+    assert result["attendee_email"] == "lead@acme.co"
+    assert calendar_client.booked[0].attendee_email == "lead@acme.co"
 
 
 async def test_malformed_attendee_email_is_rejected_and_trips(
@@ -133,6 +133,23 @@ async def test_malformed_attendee_email_is_rejected_and_trips(
             "calendar", {"start_iso": _at(1, 15), "attendee_email": "not-an-email"}, TENANT
         )
     assert ex.value.param == "attendee_email"
+    assert calendar_client.booked == []
+
+
+async def test_placeholder_example_attendee_email_is_rejected(
+    connections, credentials, sink, calendar_client, manager
+):
+    # A voice model routinely substitutes a heard address with example.com; sending a
+    # real lead's confirmation there is a privacy bug, so a reserved/placeholder domain
+    # is refused (the booking trips rather than silently mailing a fake address).
+    config = make_config(email_enabled=False)
+    reg = await _calendar_registry(config, connections, credentials, sink, calendar_client, manager)
+    for bad in ("lead@example.com", "lead@example.org", "someone@foo.test", "x@internal.localhost"):
+        with pytest.raises(GuardrailViolation) as ex:
+            await reg.execute(
+                "calendar", {"start_iso": _at(1, 15), "attendee_email": bad}, TENANT
+            )
+        assert ex.value.param == "attendee_email"
     assert calendar_client.booked == []
 
 
