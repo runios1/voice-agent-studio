@@ -76,11 +76,7 @@ from backend.integration.supervisor import SupervisedOrchestrator
 from backend.live_agent.compiler import LiveAgentCompilerImpl
 from backend.live_agent.moderation import build_stream_moderator
 from backend.live_agent.preview_transport import create_router as create_live_preview_router
-from backend.live_agent.phone_transport import (
-    build_caller_id_verifier,
-    create_twilio_media_router,
-    twilio_configured,
-)
+from backend.live_agent.phone_transport import create_twilio_media_router, twilio_configured
 from backend.live_agent.session import GeminiLiveAgentSession
 from backend.integration.live_dialer import build_live_dialer
 from backend.security import build_screener
@@ -128,13 +124,8 @@ def build_app() -> FastAPI:
     # agent as the browser preview over a real phone (LiveDialer + Twilio Media Streams).
     # Without Twilio, fall back to the scripted-mock text dialer so a campaign still runs
     # end-to-end in dev.
-    # DEMO (trial account): one verifier, shared by the orchestrator (which STARTS
-    # verification as leads are registered) and the dialer (which WAITS for it before
-    # placing each call). No-op unless TWILIO_VERIFY_LEADS=1 — so paid accounts and
-    # non-Twilio runs are unaffected.
-    caller_id_verifier = build_caller_id_verifier()
     if twilio_configured():
-        dialer = build_live_dialer(tool_stack, sink, verifier=caller_id_verifier)
+        dialer = build_live_dialer(tool_stack, sink)
     else:
         dialer = RealDialer(engine, tool_stack, make_transport_factory(), sink)
     orch = SupervisedOrchestrator(
@@ -142,7 +133,6 @@ def build_app() -> FastAPI:
         dialer=dialer,
         repo=build_orchestrator_repository(),  # Postgres per-lead state when configured
         sink=sink,
-        caller_id_verifier=caller_id_verifier,
     )
     app.state.events = events
     app.state.orch = orch

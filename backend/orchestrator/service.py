@@ -17,7 +17,6 @@ because we need the LOCKED guardrails to clamp the authorized envelope (D4/D-sec
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Awaitable, Callable, Optional, Protocol
 
@@ -44,27 +43,9 @@ from backend.orchestrator.repository import (
 from backend.orchestrator.runner import CampaignRunner
 
 
-log = logging.getLogger("voice_agent_studio.orchestrator")
-
-
 class LeadSpec(BaseModel):
     phone: str
     display_name: Optional[str] = None
-
-
-class CallerIdVerifier(Protocol):
-    """DEMO/trial support: register a lead number as a Twilio verified caller ID so a
-    trial account is allowed to dial it. Returns the code Twilio speaks on its
-    verification call, or None. Structurally satisfied by
-    `live_agent.phone_transport.TwilioCallerIdVerifier`; the default no-ops so paid
-    accounts, dev, and tests need nothing."""
-
-    async def verify(self, phone: str, *, friendly_name: Optional[str] = None) -> Optional[str]: ...
-
-
-class _NullCallerIdVerifier:
-    async def verify(self, phone: str, *, friendly_name: Optional[str] = None) -> Optional[str]:
-        return None
 
 
 class ConfigSource(Protocol):
@@ -83,14 +64,9 @@ class OrchestratorService:
         sink: Optional[EventSink] = None,
         clock: Optional[Clock] = None,
         sleep: Optional[Callable[[float], Awaitable[None]]] = None,
-        caller_id_verifier: Optional[CallerIdVerifier] = None,
     ):
         self.config_source = config_source
         self.dialer = dialer
-        # DEMO: on a Twilio trial account, a lead must be a verified caller ID before it
-        # can be dialed. The real verifier (injected at integration) kicks that flow off
-        # as leads are registered; the no-op default is right for paid accounts + tests.
-        self.caller_id_verifier = caller_id_verifier or _NullCallerIdVerifier()
         self.repo = repo or InMemoryOrchestratorRepository()
         # A no-op sink keeps the service usable without the event backbone; the real
         # P2-5 sink is injected at integration.
@@ -143,33 +119,11 @@ class OrchestratorService:
             for spec in leads
         ]
         self.repo.add_leads(lead_rows)
-        await self._verify_caller_ids(lead_rows)
 
         await self._emit(
             campaign, EventType.CAMPAIGN_STARTED, payload={"lead_count": len(lead_rows)}
         )
         return campaign
-
-    async def _verify_caller_ids(self, lead_rows: list[Lead]) -> None:
-        """DEMO/trial support: as leads are registered, kick off Twilio's verified-caller-ID
-        flow for each so a trial account is allowed to dial them (Twilio calls the number and
-        speaks a code the callee enters — see `TwilioCallerIdVerifier`). Best-effort: a paid
-        account uses the no-op verifier, and any failure here (already verified, trial cap
-        hit, network) is logged, never raised — it must not block a campaign."""
-        for lead in lead_rows:
-            try:
-                code = await self.caller_id_verifier.verify(
-                    lead.phone, friendly_name=lead.display_name or "Lead"
-                )
-                if code is not None:
-                    log.info(
-                        "caller-id verification started for %s — Twilio is calling it to "
-                        "speak code %s (the callee must answer and enter it)",
-                        lead.phone,
-                        code,
-                    )
-            except Exception as exc:  # noqa: BLE001 — demo helper must never break authorize
-                log.warning("caller-id verification for %s failed (ignored): %s", lead.phone, exc)
 
     # --- run / recover -------------------------------------------------------
     async def run_campaign(self, campaign_id: str, tenant_id: str) -> Campaign:

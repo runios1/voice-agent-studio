@@ -60,22 +60,7 @@ class _RegistryBuilder:
         return object()
 
 
-class _FakeVerifier:
-    """Records the gate call and returns a preset verified/not-verified answer."""
-
-    def __init__(self, verified: bool) -> None:
-        self._verified = verified
-        self.waited: list = []
-
-    async def verify(self, phone, *, friendly_name=None):
-        return "123456"
-
-    async def wait_until_verified(self, phone, *, timeout=None):
-        self.waited.append(phone)
-        return self._verified
-
-
-def _dialer(session, transport, verifier=None):
+def _dialer(session, transport):
     return LiveDialer(
         compiler=_Compiler(),
         registry_builder=_RegistryBuilder(),
@@ -83,7 +68,6 @@ def _dialer(session, transport, verifier=None):
         session_factory=lambda: session,
         moderator_factory=lambda: object(),
         transport_factory=_Factory(transport),
-        verifier=verifier,
     )
 
 
@@ -111,31 +95,6 @@ async def test_no_answer_maps_to_no_answer_and_hangs_up_the_ringing_leg():
 
     assert cs.outcome == CallOutcome.NO_ANSWER
     assert transport.ended  # we hung up the leg Twilio was still ringing
-
-
-async def test_gate_waits_for_verification_then_dials():
-    verifier = _FakeVerifier(verified=True)
-    session = FakeSession(outcome=LiveOutcome.BOOKED)
-    dialer = _dialer(session, FakeTransport(), verifier=verifier)
-
-    cs = await dialer.dial(sample_ready_config(), CAMPAIGN, LEAD)
-
-    assert verifier.waited == [LEAD.phone]  # it gated on this lead's number
-    assert session.ran  # verified -> the call was placed
-    assert cs.outcome == CallOutcome.BOOKED
-
-
-async def test_gate_skips_the_call_when_never_verified():
-    verifier = _FakeVerifier(verified=False)
-    session = FakeSession(outcome=LiveOutcome.BOOKED)
-    dialer = _dialer(session, FakeTransport(), verifier=verifier)
-
-    cs = await dialer.dial(sample_ready_config(), CAMPAIGN, LEAD)
-
-    assert verifier.waited == [LEAD.phone]
-    assert not session.ran  # unverified -> no call placed
-    assert cs.outcome == CallOutcome.NO_ANSWER
-    assert cs.lead_id == "l1" and cs.disclosed is False
 
 
 def test_outcome_mapping():
