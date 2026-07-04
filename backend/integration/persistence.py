@@ -34,6 +34,28 @@ def _in_memory_only() -> bool:
     return os.getenv("VAS_IN_MEMORY", "false").lower() == "true"
 
 
+def _postgres_required() -> bool:
+    """True in a hosted deployment where a silent SQLite fallback would mean data
+    loss on every restart. Render sets `RENDER=true` on every service, so a deploy
+    that forgot `DATABASE_URL` must fail loudly at boot rather than quietly persist
+    to an ephemeral disk. `VAS_REQUIRE_POSTGRES=true` opts any environment in."""
+    if os.getenv("VAS_REQUIRE_POSTGRES", "").lower() == "true":
+        return True
+    return os.getenv("RENDER", "").lower() == "true"
+
+
+def _no_sqlite_fallback() -> None:
+    """Guard the SQLite fallback: in a Postgres-required environment, refuse to
+    stand up SQLite so a missing/mistyped `DATABASE_URL` surfaces immediately."""
+    if _postgres_required():
+        raise RuntimeError(
+            "DATABASE_URL is not set, but this environment requires Postgres "
+            "(RENDER or VAS_REQUIRE_POSTGRES). Refusing to fall back to ephemeral "
+            "SQLite — set DATABASE_URL to your Supabase session-pooler connection "
+            "string (see docs/supabase-setup.md)."
+        )
+
+
 def using_durable_storage() -> bool:
     """True when agents/campaigns/events/accounts actually survive a restart
     (Postgres or SQLite) — False only for the explicit ephemeral test/CI mode."""
@@ -54,6 +76,7 @@ def build_config_repository():
         repo.init_schema()  # idempotent CREATE TABLE IF NOT EXISTS — bootstraps a fresh DB
         log.info("config: Postgres repository")
         return repo
+    _no_sqlite_fallback()
     from backend.config_gate.sqlite_repository import SQLiteConfigRepository
 
     log.info("config: SQLite repository")
@@ -74,6 +97,7 @@ def build_event_service():
         store.init_schema()  # idempotent — creates events table + NOTIFY trigger on a fresh DB
         log.info("events: Postgres store + LISTEN/NOTIFY bus")
         return EventService(store=store, bus=PostgresListenBus(store))
+    _no_sqlite_fallback()
     from backend.events.sqlite_store import SQLiteEventStore
 
     log.info("events: SQLite store + in-process bus")
@@ -94,6 +118,7 @@ def build_orchestrator_repository():
         repo.init_schema()  # idempotent — bootstraps per-lead campaign-state tables
         log.info("orchestrator: Postgres repository")
         return repo
+    _no_sqlite_fallback()
     from backend.orchestrator.sqlite_repository import SQLiteOrchestratorRepository
 
     log.info("orchestrator: SQLite repository")
@@ -114,6 +139,7 @@ def build_auth_store():
         store.init_schema()  # idempotent — bootstraps users + sessions tables
         log.info("auth: Postgres store")
         return store
+    _no_sqlite_fallback()
     from backend.auth.sqlite_store import SQLiteAuthStore
 
     log.info("auth: SQLite store")

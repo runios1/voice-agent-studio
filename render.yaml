@@ -42,6 +42,9 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
-      # Durable storage (optional). Unset -> SQLite (resets on restart, fine for tests).
-      # - key: DATABASE_URL
-      #   sync: false
+      # Durable storage — REQUIRED on Render. The app sets RENDER=true here, so a
+      # missing DATABASE_URL fails fast at boot instead of silently using ephemeral
+      # SQLite (which resets on every restart). Use the Supabase SESSION pooler
+      # string (port 5432) + ?sslmode=require — see docs/supabase-setup.md.
+      - key: DATABASE_URL
+        sync: false
