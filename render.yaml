@@ -1,0 +1,47 @@
+# Render Blueprint — one Docker web service that serves the API, the live WebSockets,
+# and the built React app (same origin). Free plan: fine for OUTBOUND calls (a request
+# wakes the box, which stays up during the call); it sleeps when idle, so the first hit
+# after ~15 min cold-starts, and the SQLite file resets on restart (use DATABASE_URL /
+# Postgres for durable data). See docs/deploy-render.md.
+services:
+  - type: web
+    name: voice-agent-studio
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      # Required.
+      - key: GEMINI_API_KEY
+        sync: false
+      # Fernet key for connected-tool tokens at rest (generate one; see .env.example).
+      - key: TOOL_REGISTRY_ENC_KEY
+        sync: false
+      # Served over https on Render -> the session cookie must be Secure.
+      - key: COOKIE_SECURE
+        value: "true"
+      # Google sign-in + Calendar/Gmail tool-connect (same OAuth client).
+      # Register BOTH callback paths on it, on your <app>.onrender.com origin:
+      #   /api/auth/google/callback   and   /api/oauth/callback
+      # OAUTH_REDIRECT_BASE_URL / APP_BASE_URL auto-default to RENDER_EXTERNAL_URL.
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      # Twilio outbound calls. PUBLIC_WSS_BASE is NOT needed — it derives from
+      # RENDER_EXTERNAL_HOSTNAME automatically. Trial accounts call verified numbers only.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      # Resend email (optional; onboarding@resend.dev works with no domain).
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      # Durable storage (optional). Unset -> SQLite (resets on restart, fine for tests).
+      # - key: DATABASE_URL
+      #   sync: false

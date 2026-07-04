@@ -239,12 +239,26 @@ def create_twilio_media_router() -> APIRouter:
 
 
 # --- env-gated construction --------------------------------------------------- #
+def public_wss_base() -> Optional[str]:
+    """The public wss origin Twilio dials our media stream on. Explicit PUBLIC_WSS_BASE
+    wins; otherwise derive it from RENDER_EXTERNAL_HOSTNAME (Render sets this on every
+    web service) so a Render deploy needs no manual URL — the value isn't even known
+    until the service exists."""
+    base = os.getenv("PUBLIC_WSS_BASE")
+    if base:
+        return base.rstrip("/")
+    host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+    if host:
+        return f"wss://{host}"
+    return None
+
+
 def twilio_configured() -> bool:
     return bool(
         os.getenv("TWILIO_ACCOUNT_SID")
         and os.getenv("TWILIO_AUTH_TOKEN")
         and os.getenv("TWILIO_FROM_NUMBER")
-        and os.getenv("PUBLIC_WSS_BASE")
+        and public_wss_base()
     )
 
 
@@ -256,6 +270,6 @@ def build_phone_transport(to_number: str) -> PhoneAudioTransport:
     return PhoneAudioTransport(
         to_number=to_number,
         from_number=os.environ["TWILIO_FROM_NUMBER"],
-        public_wss_base=os.environ["PUBLIC_WSS_BASE"],
+        public_wss_base=public_wss_base() or "",
         placer=TwilioRestPlacer(sid, token),
     )

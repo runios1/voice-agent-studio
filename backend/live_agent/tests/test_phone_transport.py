@@ -115,3 +115,17 @@ async def test_no_answer_times_out_as_PhoneNotAnswered():
     t = _transport(placer, connect_timeout=0.05)  # Twilio never connects the stream
     with pytest.raises(PhoneNotAnswered):
         await t.start()
+
+
+def test_public_wss_base_prefers_explicit_then_derives_from_render(monkeypatch):
+    from backend.live_agent import phone_transport as pt
+
+    monkeypatch.delenv("PUBLIC_WSS_BASE", raising=False)
+    monkeypatch.delenv("RENDER_EXTERNAL_HOSTNAME", raising=False)
+    assert pt.public_wss_base() is None
+
+    monkeypatch.setenv("RENDER_EXTERNAL_HOSTNAME", "myapp.onrender.com")
+    assert pt.public_wss_base() == "wss://myapp.onrender.com"  # derived on Render
+
+    monkeypatch.setenv("PUBLIC_WSS_BASE", "wss://explicit.example/")
+    assert pt.public_wss_base() == "wss://explicit.example"  # explicit wins, slash trimmed

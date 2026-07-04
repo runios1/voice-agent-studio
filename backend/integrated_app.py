@@ -79,6 +79,7 @@ from backend.live_agent.phone_transport import create_twilio_media_router, twili
 from backend.live_agent.session import GeminiLiveAgentSession
 from backend.integration.live_dialer import build_live_dialer
 from backend.security import build_screener
+from backend.static_site import mount_frontend
 
 log = logging.getLogger("voice_agent_studio.integrated")
 
@@ -127,9 +128,12 @@ def build_app() -> FastAPI:
     app.state.tool_stack = tool_stack
 
     # Backend's own OAuth callback URL (must match what's registered with the
-    # provider) vs. where the browser bounces back to in the app once it's run.
-    oauth_redirect_base = os.getenv("OAUTH_REDIRECT_BASE_URL", "http://localhost:8000")
-    app_base_url = os.getenv("APP_BASE_URL", "http://localhost:5173")
+    # provider) vs. where the browser bounces back to in the app once it's run. On
+    # Render, both default to the service's own https URL (RENDER_EXTERNAL_URL) — a
+    # single same-origin service — so a deploy needs no manual URL wiring.
+    render_url = os.getenv("RENDER_EXTERNAL_URL")
+    oauth_redirect_base = os.getenv("OAUTH_REDIRECT_BASE_URL") or render_url or "http://localhost:8000"
+    app_base_url = os.getenv("APP_BASE_URL") or render_url or "http://localhost:5173"
 
     app.include_router(create_orch_router(orch), prefix="/api")
     app.include_router(create_events_router(events), prefix="/api")
@@ -202,6 +206,11 @@ def build_app() -> FastAPI:
     async def _drain() -> None:
         # Stop launching new dials and cancel in-flight campaign loops for a clean exit.
         await orch.shutdown()
+
+    # Serve the built SPA same-origin (production/Docker). No-op in local dev / tests
+    # where there's no frontend/dist — added LAST so /api + WS routes win over the shell.
+    served = mount_frontend(app)
+    log.info("frontend served from backend: %s", served)
 
     return app
 
