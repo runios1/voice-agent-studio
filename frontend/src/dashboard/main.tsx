@@ -9,6 +9,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "../index.css";
 import { DashboardApp } from "./DashboardApp";
+import { DashboardRoot } from "./DashboardRoot";
 import { createHttpDashboardApi, type DashboardApi } from "./dashboardApi";
 import { createMockDashboardApi } from "./mockDashboardApi";
 import { createHttpConnectionsApi } from "../connections/connectionsApi";
@@ -23,8 +24,14 @@ const connectionsApi: ConnectionsApi = useMock
   ? createMockConnectionsApi()
   : createHttpConnectionsApi();
 
+// Real mode gates on the session (DashboardRoot redirects to the login page when
+// signed out); mock mode has no backend session, so it renders straight through.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <DashboardApp api={api} connectionsApi={connectionsApi} />
+    {useMock ? (
+      <DashboardApp api={api} connectionsApi={connectionsApi} />
+    ) : (
+      <DashboardRoot api={api} connectionsApi={connectionsApi} />
+    )}
   </StrictMode>,
 );
