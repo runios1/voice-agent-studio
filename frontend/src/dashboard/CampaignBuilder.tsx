@@ -199,6 +199,23 @@ export function CampaignBuilder() {
 
       {step === "leads" && (
         <section className="space-y-5 px-5 py-4">
+          <div
+            data-testid="trial-verification-notice"
+            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          >
+            <p className="font-semibold">⚠️ Demo on a Twilio trial account</p>
+            <p className="mt-1">
+              A trial account may only call <em>verified</em> numbers. When you add a
+              lead here we automatically start Twilio's verification for it — Twilio
+              places a call to that number and speaks a 6-digit code that the person
+              must answer and enter. This is Twilio's proof-of-ownership step and can't
+              be skipped, so it only works for phones you can pick up (e.g. your own
+              test devices). The campaign <strong>waits</strong> until each number is
+              verified before dialing it (a lead that isn't verified within a few
+              minutes is skipped as unreachable), and the trial cap still applies. A
+              paid account removes this entirely.
+            </p>
+          </div>
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase text-muted">
               Add a lead

@@ -93,6 +93,121 @@ class TwilioRestPlacer:
                 pass  # best effort; the leg may already be down
 
 
+# --- verified caller IDs (demo/trial support) --------------------------------- #
+# A Twilio *trial* account may only call numbers that are registered as verified caller
+# IDs. Verification is a proof-of-ownership flow by design: Twilio places a call to the
+# number and the person must answer and key in a spoken 6-digit code — there is NO API
+# to silently mark an arbitrary number verified. So this only helps when the demo
+# "leads" are phones you can actually answer. A paid (non-trial) account needs none of
+# this and should use the no-op verifier.
+class CallerIdVerifier(Protocol):
+    """Kicks off (and waits on) Twilio's verified-caller-ID flow for a destination number.
+    Injected so tests/dev never hit Twilio."""
+
+    async def verify(self, phone: str, *, friendly_name: Optional[str] = None) -> Optional[str]:
+        """Start verification. Returns the 6-digit code Twilio speaks on its verification
+        call, or None if it couldn't be started."""
+        ...
+
+    async def wait_until_verified(self, phone: str, *, timeout: Optional[float] = None) -> bool:
+        """Block until `phone` is a verified caller ID (the callee answered + entered the
+        code), or the timeout elapses. Returns True once verified, False on timeout — the
+        dialer gates each call on this so a trial account never places a call that Twilio
+        would reject."""
+        ...
+
+
+class NullCallerIdVerifier:
+    """No-op default: paid accounts don't need verification, and dev/tests shouldn't call
+    Twilio. `wait_until_verified` returns True immediately so it never gates dialing."""
+
+    async def verify(self, phone: str, *, friendly_name: Optional[str] = None) -> Optional[str]:
+        return None
+
+    async def wait_until_verified(self, phone: str, *, timeout: Optional[float] = None) -> bool:
+        return True
+
+
+class TwilioCallerIdVerifier:
+    """Real verifier: `POST /OutgoingCallerIds.json` makes Twilio call `phone` and speak a
+    6-digit code the callee must enter to prove ownership. On success the number becomes a
+    verified caller ID the (trial) account may dial. `wait_until_verified` polls the
+    account's verified list until the number shows up. Same creds as the placer."""
+
+    _BASE = "https://api.twilio.com/2010-04-01/Accounts"
+
+    def __init__(
+        self, account_sid: str, auth_token: str, *, wait_timeout: float = 180.0, poll_interval: float = 3.0
+    ) -> None:
+        self._sid = account_sid
+        self._auth = (account_sid, auth_token)
+        self._wait_timeout = wait_timeout
+        self._poll_interval = poll_interval
+
+    async def verify(  # pragma: no cover - live leg
+        self, phone: str, *, friendly_name: Optional[str] = None
+    ) -> Optional[str]:
+        import httpx
+
+        data = {"PhoneNumber": phone}
+        if friendly_name:
+            data["FriendlyName"] = friendly_name[:64]
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{self._BASE}/{self._sid}/OutgoingCallerIds.json",
+                auth=self._auth,
+                data=data,
+            )
+            resp.raise_for_status()
+            return resp.json().get("validation_code")
+
+    async def _is_verified(self, client, phone: str) -> bool:  # pragma: no cover - live leg
+        resp = await client.get(
+            f"{self._BASE}/{self._sid}/OutgoingCallerIds.json",
+            auth=self._auth,
+            params={"PhoneNumber": phone},
+        )
+        resp.raise_for_status()
+        return bool(resp.json().get("outgoing_caller_ids"))
+
+    async def wait_until_verified(  # pragma: no cover - live leg
+        self, phone: str, *, timeout: Optional[float] = None
+    ) -> bool:
+        import time
+
+        import httpx
+
+        deadline = time.monotonic() + (timeout if timeout is not None else self._wait_timeout)
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            while True:
+                try:
+                    if await self._is_verified(client, phone):
+                        return True
+                except Exception:
+                    pass  # transient (rate limit / network) — keep polling until the deadline
+                if time.monotonic() >= deadline:
+                    return False
+                await asyncio.sleep(self._poll_interval)
+
+
+def build_caller_id_verifier() -> CallerIdVerifier:
+    """The trial-demo verifier when `TWILIO_VERIFY_LEADS=1` and account creds are set, else
+    the no-op. Gated behind an explicit flag (not just the presence of creds) so a PAID
+    account — which has the same creds but does NOT use verified caller IDs — is never made
+    to wait on a verification that will never complete. Optional `TWILIO_VERIFY_TIMEOUT`
+    (seconds) tunes how long the dialer waits per lead."""
+    enabled = os.getenv("TWILIO_VERIFY_LEADS", "").strip().lower() in {"1", "true", "yes"}
+    sid = os.getenv("TWILIO_ACCOUNT_SID")
+    token = os.getenv("TWILIO_AUTH_TOKEN")
+    if enabled and sid and token:
+        try:
+            timeout = float(os.getenv("TWILIO_VERIFY_TIMEOUT", "180"))
+        except ValueError:
+            timeout = 180.0
+        return TwilioCallerIdVerifier(sid, token, wait_timeout=timeout)
+    return NullCallerIdVerifier()
+
+
 def _stream_twiml(wss_url: str) -> str:
     # <Connect><Stream> is bidirectional: Twilio forks call audio to us AND plays back
     # what we send. (<Start><Stream> would be one-way.)
