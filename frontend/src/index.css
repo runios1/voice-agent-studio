@@ -2,6 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ------------------------------------------------------------------ *
+ * Design tokens. One variable set, two themes. Values are "R G B"
+ * triplets so Tailwind opacity modifiers (bg-accent/20) keep working.
+ * Light is the default; dark applies via [data-theme="dark"] (set by
+ * the theme toggle) OR the OS preference when the user hasn't chosen.
+ * ------------------------------------------------------------------ */
+:root {
+  --c-canvas: 250 249 247; /* warm paper */
+  --c-surface: 255 255 255;
+  --c-panel: 244 242 238;
+  --c-ink: 26 22 37; /* deep plum-black */
+  --c-muted: 108 100 122;
+  --c-line: 232 228 222;
+  --c-accent: 99 78 245; /* brand violet */
+  --c-accent-ink: 255 255 255; /* text on accent */
+  --c-signal: 13 173 166; /* teal — the "voice/live" signal color */
+  --c-shadow: 39 30 74;
+}
+
+:root[data-theme="dark"] {
+  --c-canvas: 12 11 19;
+  --c-surface: 22 20 31;
+  --c-panel: 28 25 40;
+  --c-ink: 244 242 250;
+  --c-muted: 158 152 176;
+  --c-line: 42 39 58;
+  --c-accent: 141 124 255;
+  --c-accent-ink: 17 14 28;
+  --c-signal: 45 212 205;
+  --c-shadow: 0 0 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-canvas: 12 11 19;
+    --c-surface: 22 20 31;
+    --c-panel: 28 25 40;
+    --c-ink: 244 242 250;
+    --c-muted: 158 152 176;
+    --c-line: 42 39 58;
+    --c-accent: 141 124 255;
+    --c-accent-ink: 17 14 28;
+    --c-signal: 45 212 205;
+    --c-shadow: 0 0 0;
+  }
+}
+
 html,
 body,
 #root {
@@ -10,8 +57,63 @@ body,
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
-  color: theme("colors.ink");
-  background: theme("colors.canvas");
+  font-family: theme("fontFamily.sans");
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-canvas));
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  /* The brand wordmark / any headline gradient text. */
+  .text-brand-gradient {
+    background-image: linear-gradient(
+      100deg,
+      rgb(var(--c-accent)),
+      rgb(var(--c-signal))
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Primary CTA — gradient fill with a soft brand glow on hover. */
+  .btn-primary {
+    background-image: linear-gradient(
+      135deg,
+      rgb(var(--c-accent)),
+      color-mix(in srgb, rgb(var(--c-accent)) 70%, rgb(var(--c-signal)))
+    );
+    color: rgb(var(--c-accent-ink));
+    transition: box-shadow 0.18s ease, transform 0.18s ease, filter 0.18s ease;
+  }
+  .btn-primary:not(:disabled):hover {
+    box-shadow: 0 8px 24px -8px rgb(var(--c-accent) / 0.6);
+    filter: brightness(1.04);
+  }
+  .btn-primary:not(:disabled):active {
+    transform: translateY(1px);
+  }
+
+  /* The chat backdrop: a living surface instead of dead white — a soft
+     radial brand wash bleeding in from the corners over the canvas. */
+  .chat-backdrop {
+    background:
+      radial-gradient(
+        60rem 40rem at 12% -10%,
+        rgb(var(--c-accent) / 0.08),
+        transparent 60%
+      ),
+      radial-gradient(
+        50rem 40rem at 100% 110%,
+        rgb(var(--c-signal) / 0.07),
+        transparent 55%
+      ),
+      rgb(var(--c-canvas));
+  }
+
+  /* A frosted bar that reads correctly over the tinted backdrop. */
+  .glass {
+    background: rgb(var(--c-surface) / 0.72);
+    backdrop-filter: saturate(1.4) blur(12px);
+  }
 }

@@ -4,9 +4,11 @@ import type { AgentApi } from "../api/agentApi";
 import type { AuthUser } from "../auth/authApi";
 import { logout } from "../auth/authApi";
 import { useAgentStore } from "../store/agentStore";
+import { useTheme } from "../lib/useTheme";
 import { BuilderChat } from "./BuilderChat";
 import { PreviewChat } from "./PreviewChat";
 import { AgentPanel } from "./AgentPanel";
+import { Wordmark } from "./Brand";
 
 type Tab = "build" | "preview";
 
@@ -33,6 +35,7 @@ export function App({
   const config = useAgentStore((s) => s.config);
   const [tab, setTab] = useState<Tab>("build");
   const [error, setError] = useState<string | null>(null);
+  const { theme, toggle } = useTheme();
 
   // Load the agent, then let the builder open the conversation (it speaks first).
   useEffect(() => {
@@ -52,9 +55,10 @@ export function App({
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-line px-4 py-2">
-        <span className="text-sm font-semibold">Voice Agent Studio</span>
-        <nav className="flex gap-1">
+      <header className="glass sticky top-0 z-10 flex items-center gap-4 border-b border-line/70 px-4 py-2.5">
+        <Wordmark />
+
+        <nav className="ml-2 flex gap-1 rounded-full border border-line/70 bg-panel/60 p-1">
           <TabButton active={tab === "build"} onClick={() => setTab("build")}>
             Build
           </TabButton>
@@ -62,29 +66,46 @@ export function App({
             Preview
           </TabButton>
         </nav>
-        {/* Cross-link to the operations dashboard (P2-7). Separate entry/root, so a
-            plain navigation rather than an in-app tab — keeps the two surfaces and
-            their stores decoupled while making the dashboard discoverable. */}
-        <a href="/dashboard.html" className="ml-auto text-sm text-muted hover:text-ink">
-          Operations dashboard ↗
-        </a>
-        {user && (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <span>{user.email}</span>
-            <button
-              onClick={() => {
-                logout().then(() => onSignedOut?.());
-              }}
-              className="rounded-md px-2 py-1 hover:bg-panel hover:text-ink"
-            >
-              Sign out
-            </button>
-          </div>
-        )}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Cross-link to the operations dashboard (P2-7). Separate entry/root, so a
+              plain navigation rather than an in-app tab — keeps the two surfaces and
+              their stores decoupled while making the dashboard discoverable. */}
+          <a
+            href="/dashboard.html"
+            className="hidden rounded-full px-3 py-1.5 text-sm text-muted transition-colors hover:bg-panel hover:text-ink sm:block"
+          >
+            Operations ↗
+          </a>
+          <button
+            onClick={toggle}
+            aria-label="Toggle color theme"
+            title="Toggle theme"
+            className="grid h-8 w-8 place-items-center rounded-full text-muted transition-colors hover:bg-panel hover:text-ink"
+          >
+            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+          </button>
+          {user && (
+            <div className="flex items-center gap-2 border-l border-line/70 pl-2 text-sm text-muted">
+              <span className="hidden md:inline">{user.email}</span>
+              <button
+                onClick={() => {
+                  logout().then(() => onSignedOut?.());
+                }}
+                className="rounded-full px-3 py-1.5 transition-colors hover:bg-panel hover:text-ink"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       {error && (
-        <div className="bg-red-50 px-4 py-2 text-sm text-red-700" role="alert">
+        <div
+          className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-600 dark:text-red-300"
+          role="alert"
+        >
           {error}
         </div>
       )}
@@ -99,7 +120,7 @@ export function App({
           tab === "preview" ? "grid-cols-1" : "grid-cols-[1fr_360px]",
         )}
       >
-        <main className="min-h-0">
+        <main className="chat-backdrop min-h-0">
           {!config ? (
             <div className="flex h-full items-center justify-center text-muted">
               Loading…
@@ -120,6 +141,30 @@ export function App({
   );
 }
 
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="currentColor">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+    </svg>
+  );
+}
+
+function SunIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-[18px] w-[18px]"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
+  );
+}
+
 function TabButton({
   active,
   onClick,
@@ -133,8 +178,10 @@ function TabButton({
     <button
       onClick={onClick}
       className={clsx(
-        "rounded-md px-3 py-1 text-sm",
-        active ? "bg-panel font-medium text-ink" : "text-muted hover:text-ink",
+        "rounded-full px-4 py-1 text-sm transition-all",
+        active
+          ? "bg-surface font-semibold text-ink shadow-card"
+          : "text-muted hover:text-ink",
       )}
     >
       {children}

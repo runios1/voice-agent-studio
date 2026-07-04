@@ -10,9 +10,11 @@
  * user feels heard without those items entering the operative config.
  */
 import * as Collapsible from "@radix-ui/react-collapsible";
+import clsx from "clsx";
 import type { FieldPolicy } from "../types/contracts";
 import { useAgentStore } from "../store/agentStore";
 import { FieldRow } from "./FieldRow";
+import { Logomark } from "./Brand";
 
 export function AgentPanel() {
   const config = useAgentStore((s) => s.config);
@@ -45,27 +47,34 @@ export function AgentPanel() {
     <Collapsible.Root
       open={panelOpen}
       onOpenChange={(o) => togglePanel(o)}
-      className="flex h-full flex-col border-l border-line bg-panel"
+      className="flex h-full flex-col border-l border-line bg-panel/60"
     >
       <Collapsible.Trigger
         data-testid="panel-toggle"
-        className="flex items-center justify-between gap-2 border-b border-line px-4 py-3 text-left"
+        className="group flex items-center gap-3 border-b border-line px-4 py-3.5 text-left transition-colors hover:bg-panel"
       >
-        <div>
-          <div className="text-sm font-semibold text-ink">{config.meta.name}</div>
-          <div className="text-xs text-muted">
-            <StatusPill status={config.meta.status} /> · {requiredDone}/
-            {requiredTotal} required fields
+        <ProgressRing done={requiredDone} total={requiredTotal} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-ink">
+            {config.meta.name}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+            <StatusPill status={config.meta.status} />
+            <span>
+              {requiredDone}/{requiredTotal} required
+            </span>
           </div>
         </div>
-        <span className="text-muted">{panelOpen ? "▸" : "◂"}</span>
+        <span className="text-muted transition-transform group-hover:text-ink">
+          {panelOpen ? "▸" : "◂"}
+        </span>
       </Collapsible.Trigger>
 
       <Collapsible.Content
         className="min-h-0 flex-1 overflow-y-auto"
         data-testid="panel-content"
       >
-        <Section title="🔒 Set by platform">
+        <Section title="🔒 Set by platform" tone="locked">
           {platformFields.map((p) => (
             <FieldRow key={p.path} policy={p} />
           ))}
@@ -73,9 +82,13 @@ export function AgentPanel() {
 
         <Section title="Your agent">
           {userFields.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-muted">
-              Fields appear here as you describe your agent.
-            </p>
+            <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+              <Logomark className="h-9 w-9 opacity-60" />
+              <p className="max-w-[16rem] text-sm text-muted">
+                Your agent takes shape here — fields appear here as you describe
+                it in the chat.
+              </p>
+            </div>
           ) : (
             userFields.map((p: FieldPolicy) => <FieldRow key={p.path} policy={p} />)
           )}
@@ -105,10 +118,23 @@ export function AgentPanel() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  tone,
+  children,
+}: {
+  title: string;
+  tone?: "locked";
+  children: React.ReactNode;
+}) {
   return (
-    <section className="border-b border-line py-2">
-      <h3 className="px-4 py-1 text-xs font-semibold uppercase tracking-wide text-muted">
+    <section
+      className={clsx(
+        "border-b border-line py-2",
+        tone === "locked" && "bg-accent/[0.04]",
+      )}
+    >
+      <h3 className="px-4 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted">
         {title}
       </h3>
       <div className="flex flex-col gap-1 px-1">{children}</div>
@@ -121,11 +147,38 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span
       data-testid="agent-status"
-      className={
-        ready ? "font-medium text-accent" : "font-medium text-muted"
-      }
+      className={clsx(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        ready
+          ? "bg-signal/15 text-signal"
+          : "bg-muted/15 text-muted",
+      )}
     >
+      <span
+        className={clsx(
+          "h-1.5 w-1.5 rounded-full",
+          ready ? "bg-signal animate-pulse-ring" : "bg-muted",
+        )}
+      />
       {ready ? "Ready" : "Draft"}
     </span>
+  );
+}
+
+/** A compact conic progress ring for required-field completion. */
+function ProgressRing({ done, total }: { done: number; total: number }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <div
+      className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full"
+      style={{
+        background: `conic-gradient(rgb(var(--c-accent)) ${pct}%, rgb(var(--c-line)) 0)`,
+      }}
+      aria-label={`${done} of ${total} required fields complete`}
+    >
+      <span className="grid h-7 w-7 place-items-center rounded-full bg-panel text-[10px] font-semibold text-ink">
+        {pct}%
+      </span>
+    </div>
   );
 }

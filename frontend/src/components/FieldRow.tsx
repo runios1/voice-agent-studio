@@ -34,21 +34,26 @@ export function FieldRow({ policy }: Props) {
       data-testid={`field-${policy.path}`}
       data-flashing={flashing || undefined}
       className={clsx(
-        "rounded-md px-3 py-2 text-sm",
+        "rounded-lg px-3 py-2 text-sm transition-colors hover:bg-surface/60",
         flashing && "animate-flash",
       )}
     >
       <div className="flex items-center gap-2">
         <span className="font-medium text-ink">{meta.label}</span>
+        {locked && (
+          <span title="locked by the platform" className="text-[11px] text-muted">
+            🔒
+          </span>
+        )}
         {policy.mutability === "default" && (
-          <span className="rounded bg-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted">
+          <span className="rounded-full bg-line px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted">
             default
           </span>
         )}
         {policy.required_for_ready && (
           <span
             title="required for the agent to be deploy-ready"
-            className="text-[10px] text-accent"
+            className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent"
           >
             required
           </span>
@@ -116,7 +121,7 @@ function FieldEditor({
     return (
       <select
         data-testid={`input-${path}`}
-        className="mt-1 w-full rounded border border-line bg-white px-2 py-1 text-sm"
+        className="mt-1 w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
         value={asText}
         onChange={(e) => onCommit(path, e.target.value)}
       >
@@ -137,7 +142,7 @@ function FieldEditor({
   const common = {
     "data-testid": `input-${path}`,
     className:
-      "mt-1 w-full rounded border border-line bg-white px-2 py-1 text-sm focus:border-accent focus:outline-none",
+      "mt-1 w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none",
     value: draft,
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setDraft(e.target.value),
