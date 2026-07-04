@@ -139,8 +139,8 @@ export function LiveVoicePreview({
                   className={clsx(
                     "mx-auto rounded-md px-3 py-1.5 text-center text-xs",
                     l.moderationVerdict === "block"
-                      ? "bg-red-50 text-red-700"
-                      : "bg-yellow-50 text-yellow-800",
+                      ? "bg-red-500/10 text-red-600 dark:text-red-300"
+                      : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300",
                   )}
                 >
                   ⚠️ {l.text}
@@ -155,8 +155,10 @@ export function LiveVoicePreview({
               >
                 <div
                   className={clsx(
-                    "max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm",
-                    l.kind === "lead" ? "bg-accent text-white" : "bg-white text-ink shadow-sm",
+                    "max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm shadow-card",
+                    l.kind === "lead"
+                      ? "rounded-br-md bg-accent text-accent-ink"
+                      : "rounded-bl-md border border-line bg-surface text-ink",
                   )}
                 >
                   {l.text}
@@ -176,7 +178,7 @@ export function LiveVoicePreview({
             <div
               data-testid="live-error"
               role="alert"
-              className="mx-auto rounded-md bg-red-50 px-3 py-1.5 text-center text-xs text-red-700"
+              className="mx-auto rounded-md bg-red-500/10 px-3 py-1.5 text-center text-xs text-red-600 dark:text-red-300"
             >
               {error}
             </div>
@@ -204,7 +206,7 @@ export function LiveVoicePreview({
             <button
               data-testid="live-talk-button"
               onClick={startCall}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white"
+              className="btn-primary rounded-lg px-4 py-2 text-sm font-semibold"
             >
               🎙️ Talk to your agent
             </button>

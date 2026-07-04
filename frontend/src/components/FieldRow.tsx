@@ -14,6 +14,16 @@ import { metaFor } from "../lib/fieldMeta";
 import { formatValue } from "../lib/format";
 import { getPath } from "../lib/paths";
 import { useAgentStore } from "../store/agentStore";
+import {
+  CAPABILITY_PROVIDER,
+  useConnectionsStore,
+} from "../connections/connectionsStore";
+import { PROVIDER_CATALOG } from "../connections/catalog";
+
+/** Deep-link into the ops dashboard's Connections screen (see store `initialView`). */
+const CONNECTIONS_URL = "/dashboard.html#connections";
+const providerLabel = (id: string) =>
+  PROVIDER_CATALOG.find((p) => p.id === id)?.label ?? id;
 
 interface Props {
   policy: FieldPolicy;
@@ -71,6 +81,80 @@ export function FieldRow({ policy }: Props) {
   );
 }
 
+/**
+ * A capability on/off switch (calendar / email). Connection-gated: if the backing
+ * provider isn't connected, the switch can't be turned ON and we point the user at
+ * Connections instead — a capability we can't fulfil is never quietly enabled.
+ * (Turning an already-on capability OFF stays allowed, e.g. after a disconnect.)
+ */
+function ToggleEditor({
+  path,
+  value,
+  onCommit,
+  meta,
+}: {
+  path: string;
+  value: unknown;
+  onCommit: (path: string, value: unknown) => void;
+  meta: ReturnType<typeof metaFor>;
+}) {
+  const field = (meta.editor.kind === "toggle" && meta.editor.field) || "enabled";
+  const hint = meta.editor.kind === "toggle" ? meta.editor.hint : undefined;
+  const on = !!(value as Record<string, unknown> | undefined)?.[field];
+
+  const provider = CAPABILITY_PROVIDER[path];
+  const loaded = useConnectionsStore((s) => s.loaded);
+  const connected = useConnectionsStore((s) =>
+    provider ? !!s.byProvider[provider]?.connected : true,
+  );
+  // Gate only once we actually know the state (avoid flashing a Connect prompt on load).
+  const gated = !!provider && loaded && !connected;
+
+  return (
+    <div className="mt-1">
+      <label
+        className={clsx(
+          "flex items-center gap-2",
+          gated && !on ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+        )}
+      >
+        <input
+          type="checkbox"
+          data-testid={`input-${path}`}
+          checked={on}
+          disabled={gated && !on}
+          onChange={(e) => onCommit(`${path}.${field}`, e.target.checked)}
+        />
+        <span className="text-muted">{on ? "On" : "Off"}</span>
+        {gated && (
+          <span
+            data-testid={`capability-locked-${path}`}
+            className="rounded-full bg-line px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted"
+          >
+            needs connection
+          </span>
+        )}
+      </label>
+
+      {gated ? (
+        <p className="mt-1 text-xs text-muted">
+          {providerLabel(provider!)} isn’t connected, so this can’t run on a live
+          call.{" "}
+          <a
+            data-testid={`connect-link-${path}`}
+            href={CONNECTIONS_URL}
+            className="font-medium text-accent hover:underline"
+          >
+            Connect {providerLabel(provider!)} →
+          </a>
+        </p>
+      ) : (
+        hint && <p className="mt-1 text-xs text-muted">{hint}</p>
+      )}
+    </div>
+  );
+}
+
 function FieldEditor({
   path,
   value,
@@ -95,26 +179,7 @@ function FieldEditor({
   };
 
   if (meta.editor.kind === "toggle") {
-    // The row's value is the whole automation block; toggle its boolean sub-field
-    // (default `enabled`) and commit to that nested path so the gate sees a leaf.
-    const field = meta.editor.field ?? "enabled";
-    const on = !!(value as Record<string, unknown> | undefined)?.[field];
-    return (
-      <div className="mt-1">
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            data-testid={`input-${path}`}
-            checked={on}
-            onChange={(e) => onCommit(`${path}.${field}`, e.target.checked)}
-          />
-          <span className="text-muted">{on ? "On" : "Off"}</span>
-        </label>
-        {meta.editor.hint && (
-          <p className="mt-1 text-xs text-muted">{meta.editor.hint}</p>
-        )}
-      </div>
-    );
+    return <ToggleEditor path={path} value={value} onCommit={onCommit} meta={meta} />;
   }
 
   if (meta.editor.kind === "select") {

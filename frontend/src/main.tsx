@@ -5,6 +5,9 @@ import { App } from "./components/App";
 import { Root } from "./components/Root";
 import { createHttpAgentApi, type AgentApi } from "./api/agentApi";
 import { createMockAgentApi } from "./dev/mockApi";
+import { createHttpConnectionsApi } from "./connections/connectionsApi";
+import { createMockConnectionsApi } from "./connections/mockConnectionsApi";
+import { useConnectionsStore } from "./connections/connectionsStore";
 
 /**
  * Phase 1 wiring: default to the mock API so the UI runs standalone before the
@@ -18,6 +21,12 @@ import { createMockAgentApi } from "./dev/mockApi";
  * (or creates) the signed-in user's agent, and shows the login screen otherwise.
  */
 const useMock = import.meta.env.VITE_USE_MOCK !== "false";
+
+// The Agent panel's capability toggles read this to gate calendar/email on whether
+// the provider is actually connected. Same mock/HTTP switch as the AgentApi.
+useConnectionsStore
+  .getState()
+  .init(useMock ? createMockConnectionsApi() : createHttpConnectionsApi());
 
 const root = createRoot(document.getElementById("root")!);
 

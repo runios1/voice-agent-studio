@@ -38,8 +38,11 @@ export function PreviewCallDashboard({ events }: { events: Event[] }) {
   }, [events]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="preview-dashboard">
-      <div className="border-b border-line px-4 py-2 text-xs font-semibold uppercase text-muted">
+    <div
+      className="flex h-full min-h-0 flex-col bg-panel/50"
+      data-testid="preview-dashboard"
+    >
+      <div className="border-b border-line px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted">
         In your dashboard
       </div>
       <div className="min-h-0 flex-1">

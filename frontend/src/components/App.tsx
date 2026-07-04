@@ -4,6 +4,7 @@ import type { AgentApi } from "../api/agentApi";
 import type { AuthUser } from "../auth/authApi";
 import { logout } from "../auth/authApi";
 import { useAgentStore } from "../store/agentStore";
+import { useConnectionsStore } from "../connections/connectionsStore";
 import { useTheme } from "../lib/useTheme";
 import { BuilderChat } from "./BuilderChat";
 import { PreviewChat } from "./PreviewChat";
@@ -52,6 +53,15 @@ export function App({
   useEffect(() => {
     if (tab === "preview" && config) startPreview();
   }, [tab, config, startPreview]);
+
+  // Re-check tenant connections when the window regains focus, so connecting a
+  // provider in the Connections tab (a separate page) ungates the matching
+  // capability toggle here without needing a manual reload.
+  useEffect(() => {
+    const refresh = () => void useConnectionsStore.getState().refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
 
   return (
     <div className="flex h-full flex-col">

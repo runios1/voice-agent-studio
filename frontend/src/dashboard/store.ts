@@ -33,6 +33,16 @@ export type DashboardView =
   | "new-campaign"
   | "connections";
 
+/** Initial view, honoring a `#connections` deep-link so the builder's "Connect …"
+ *  CTAs (for a capability whose provider isn't connected yet) land straight on the
+ *  Connections screen instead of the fleet. Any other hash falls back to "fleet". */
+function initialView(): DashboardView {
+  if (typeof window !== "undefined" && window.location.hash === "#connections") {
+    return "connections";
+  }
+  return "fleet";
+}
+
 export interface DashboardState {
   api: DashboardApi | null;
 
@@ -125,7 +135,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => {
     connected: false,
     loadError: null,
 
-    view: "fleet",
+    view: initialView(),
     selectedCampaignId: null,
     selectedCallId: null,
     selectedCampaign: null,

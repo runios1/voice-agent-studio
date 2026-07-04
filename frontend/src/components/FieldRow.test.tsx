@@ -1,10 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FieldRow } from "./FieldRow";
 import { useAgentStore } from "../store/agentStore";
+import { useConnectionsStore } from "../connections/connectionsStore";
 import { arrayApi } from "../test/mocks";
 import type { FieldPolicy } from "../types/contracts";
+import type { ConnectionInfo } from "../connections/connectionsApi";
 
 const openTone: FieldPolicy = {
   path: "conversation.persona.tone",
@@ -24,6 +26,27 @@ const calendarCapability: FieldPolicy = {
   mutability: "open",
   required_for_ready: false,
 };
+const emailCapability: FieldPolicy = {
+  path: "automation.email",
+  owner_layer: "user",
+  mutability: "open",
+  required_for_ready: false,
+};
+
+const conn = (provider: string, connected: boolean): ConnectionInfo => ({
+  provider,
+  connected,
+  scopes: [],
+  connection_ref: connected ? `ref-${provider}` : null,
+});
+
+/** Seed the (module-singleton) connections store, marked loaded so gating engages. */
+function setConnections(...cs: ConnectionInfo[]) {
+  useConnectionsStore.setState({
+    byProvider: Object.fromEntries(cs.map((c) => [c.provider, c])),
+    loaded: true,
+  });
+}
 
 async function loadStore(onPatch?: (...a: unknown[]) => void) {
   useAgentStore.setState({
@@ -86,5 +109,34 @@ describe("FieldRow manual editing", () => {
         true,
       ),
     );
+  });
+});
+
+describe("FieldRow capability connection gating", () => {
+  beforeEach(() => loadStore());
+  // The connections store is a module singleton; reset it so tests don't leak.
+  afterEach(() => useConnectionsStore.setState({ byProvider: {}, loaded: false }));
+
+  it("disables a capability whose provider isn't connected and links to Connections", async () => {
+    await loadStore();
+    setConnections(conn("gmail", false));
+    render(<FieldRow policy={emailCapability} />);
+
+    const box = screen.getByTestId("input-automation.email") as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+
+    const link = screen.getByTestId("connect-link-automation.email");
+    expect(link).toHaveAttribute("href", "/dashboard.html#connections");
+    expect(link).toHaveTextContent(/Connect Gmail/i);
+  });
+
+  it("leaves the toggle enabled once the provider is connected", async () => {
+    await loadStore();
+    setConnections(conn("gmail", true));
+    render(<FieldRow policy={emailCapability} />);
+
+    const box = screen.getByTestId("input-automation.email") as HTMLInputElement;
+    expect(box.disabled).toBe(false);
+    expect(screen.queryByTestId("connect-link-automation.email")).toBeNull();
   });
 });
