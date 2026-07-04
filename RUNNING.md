@@ -15,6 +15,32 @@ integration assembly). The frontend talks to it through the Vite `/api` proxy.
 > cd frontend && VITE_USE_MOCK=false npm run dev
 > ```
 
+## Real accounts + persistence (`backend.integrated_app`)
+Open http://localhost:5173 and you land on a **sign-in screen** ("Sign in with
+Google"), not a pre-loaded demo agent — there is no fixed dev user anymore.
+Whoever signs in is a real, durable identity, and their agents/campaigns/events
+are scoped to them (`backend/auth`).
+
+- **Storage is durable by default**, zero config: with `DATABASE_URL` unset, every
+  store (agents, campaigns, events, accounts) persists to a SQLite file at
+  `./.data/vas.db` (gitignored) — restart the backend and everything is still
+  there. Set `DATABASE_URL` to a libpq DSN to use Postgres instead (same
+  Protocols, no code change); set `VAS_IN_MEMORY=true` for a fully ephemeral
+  boot (tests/CI only).
+- **Google sign-in reuses the Calendar/Gmail OAuth client** (`GOOGLE_OAUTH_CLIENT_ID`/
+  `_SECRET` in `.env`) but a different callback path, so it needs an **additional
+  redirect URI registered** on that same client (Google Cloud Console → APIs &
+  Services → Credentials → your OAuth client → Authorized redirect URIs):
+  ```
+  http://localhost:8000/api/auth/google/callback
+  ```
+  Without `GOOGLE_OAUTH_CLIENT_ID` set at all, sign-in still works end-to-end
+  against a no-network fake identity (`FakeGoogleLoginProvider`) — fine for a
+  quick local run, not for anything beyond localhost.
+- A brand-new user gets one agent auto-created on first sign-in (mirrors the old
+  `agent-demo` convenience); returning users land back on their most recently
+  updated agent.
+
 ## Setup from a clean checkout
 ```bash
 pip install -r requirements.txt
@@ -63,11 +89,15 @@ Routes (all under `/api`):
 - `POST /api/agents/{id}/builder/messages` (SSE) — builder loop, assembled here
 - `POST /api/agents/{id}/preview/messages` (SSE) — WS4
 
-## Phase-1 shortcuts (dev only)
-- **Auth** is a fixed dev user (`current_user` dependency overridden); real session
-  auth drops in without route changes (tenant scoping is already enforced in WS2 code).
-- **Storage** is in-memory with a seeded demo agent (`agent-demo`) so the frontend's
-  default `VITE_AGENT_ID` resolves without a create step.
+## Phase-1 shortcuts (`backend.app` standalone only — dev/test, not the full stack)
+Running `backend.app:app` directly (rather than `backend.integrated_app:app`) has
+no auth routes and no Phase-2 surfaces, so it keeps the original dev shortcuts:
+- **Auth** is a fixed dev user (`current_user` dependency overridden); pass
+  `user_dependency=...` to `build_app()` to plug in a real one (that's exactly
+  what `integrated_app.py` does with `backend.auth`).
+- **Storage** is still durable SQLite by default, but a demo agent (`agent-demo`)
+  is seeded for the fixed dev user so the frontend's default `VITE_AGENT_ID`
+  resolves without a create step (idempotent — seeded once, not on every restart).
 - **Screening of the trusted system prompt is skipped** at the model-call boundary
   (`IntegrationScreeningWrapper`): the builder's system prompt *describes* the locked
   guardrails, which the WS5 guardrail-domain heuristic would otherwise read as a

@@ -1,10 +1,13 @@
-"""Storage selection — Postgres when `DATABASE_URL` is set, in-memory otherwise, in ONE
-place. Each Postgres class already implements the SAME Protocol as its in-memory
-reference and lazily imports psycopg, so selection is a pure factory choice with no code
-path change downstream (the whole point of the frozen repository seams).
+"""Storage selection, in ONE place: Postgres when `DATABASE_URL` is set, else SQLite
+(a file under `SQLITE_DB_PATH`, default `./.data/vas.db`) — a real, durable default
+with zero external services to stand up. Every store implements the SAME Protocol
+as its in-memory reference and lazily imports its driver, so selection is a pure
+factory choice with no code path change downstream (the whole point of the frozen
+repository seams).
 
-Set `DATABASE_URL` to a libpq connection string to persist config, events, and campaign
-state across restarts; leave it unset for a zero-dependency dev/CI boot.
+Set `DATABASE_URL` to a libpq connection string to persist to Postgres instead;
+set `VAS_IN_MEMORY=true` for a zero-dependency ephemeral boot (tests/CI only —
+nothing survives a restart).
 """
 
 from __future__ import annotations
@@ -24,23 +27,40 @@ def using_postgres() -> bool:
     return database_url() is not None
 
 
+def _in_memory_only() -> bool:
+    return os.getenv("VAS_IN_MEMORY", "false").lower() == "true"
+
+
+def using_durable_storage() -> bool:
+    """True when agents/campaigns/events/accounts actually survive a restart
+    (Postgres or SQLite) — False only for the explicit ephemeral test/CI mode."""
+    return not _in_memory_only()
+
+
 def build_config_repository():
     """The config repository the studio + orchestrator read the built agent from."""
+    if _in_memory_only():
+        from backend.config_gate.repository import InMemoryConfigRepository
+
+        return InMemoryConfigRepository()
     dsn = database_url()
     if dsn:
         from backend.config_gate.postgres_repository import PostgresConfigRepository
 
         log.info("config: Postgres repository")
         return PostgresConfigRepository(dsn)
-    from backend.config_gate.repository import InMemoryConfigRepository
+    from backend.config_gate.sqlite_repository import SQLiteConfigRepository
 
-    return InMemoryConfigRepository()
+    log.info("config: SQLite repository")
+    return SQLiteConfigRepository()
 
 
 def build_event_service():
     """The one event log threaded everywhere as the orchestrator's sink (contract §4)."""
     from backend.events.service import EventService
 
+    if _in_memory_only():
+        return EventService()
     dsn = database_url()
     if dsn:
         from backend.events.postgres_store import PostgresEventStore, PostgresListenBus
@@ -48,17 +68,43 @@ def build_event_service():
         store = PostgresEventStore(dsn)
         log.info("events: Postgres store + LISTEN/NOTIFY bus")
         return EventService(store=store, bus=PostgresListenBus(store))
-    return EventService()
+    from backend.events.sqlite_store import SQLiteEventStore
+
+    log.info("events: SQLite store + in-process bus")
+    return EventService(store=SQLiteEventStore())
 
 
 def build_orchestrator_repository():
     """Per-lead campaign state — the DB is the source of truth for resume-after-crash."""
+    if _in_memory_only():
+        from backend.orchestrator.repository import InMemoryOrchestratorRepository
+
+        return InMemoryOrchestratorRepository()
     dsn = database_url()
     if dsn:
         from backend.orchestrator.postgres_repository import PostgresOrchestratorRepository
 
         log.info("orchestrator: Postgres repository")
         return PostgresOrchestratorRepository(dsn)
-    from backend.orchestrator.repository import InMemoryOrchestratorRepository
+    from backend.orchestrator.sqlite_repository import SQLiteOrchestratorRepository
 
-    return InMemoryOrchestratorRepository()
+    log.info("orchestrator: SQLite repository")
+    return SQLiteOrchestratorRepository()
+
+
+def build_auth_store():
+    """User accounts + sessions — durable by default (same posture as the rest)."""
+    if _in_memory_only():
+        from backend.auth.store import InMemoryAuthStore
+
+        return InMemoryAuthStore()
+    dsn = database_url()
+    if dsn:
+        from backend.auth.postgres_store import PostgresAuthStore
+
+        log.info("auth: Postgres store")
+        return PostgresAuthStore(dsn)
+    from backend.auth.sqlite_store import SQLiteAuthStore
+
+    log.info("auth: SQLite store")
+    return SQLiteAuthStore()

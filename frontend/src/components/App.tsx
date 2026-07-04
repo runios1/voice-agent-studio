@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import type { AgentApi } from "../api/agentApi";
+import type { AuthUser } from "../auth/authApi";
+import { logout } from "../auth/authApi";
 import { useAgentStore } from "../store/agentStore";
 import { BuilderChat } from "./BuilderChat";
 import { PreviewChat } from "./PreviewChat";
@@ -10,8 +12,20 @@ type Tab = "build" | "preview";
 
 /** App shell: a full-width chat is the primary surface, with the collapsible Agent
  * panel alongside. A tab flips the chat between the builder loop and the preview
- * (talk-to-agent) loop — both share the one config the panel reflects. */
-export function App({ api, agentId }: { api: AgentApi; agentId: string }) {
+ * (talk-to-agent) loop — both share the one config the panel reflects.
+ *
+ * `user`/`onSignedOut` are absent in mock mode (no backend session to reflect). */
+export function App({
+  api,
+  agentId,
+  user,
+  onSignedOut,
+}: {
+  api: AgentApi;
+  agentId: string;
+  user?: AuthUser;
+  onSignedOut?: () => void;
+}) {
   const init = useAgentStore((s) => s.init);
   const loadAgent = useAgentStore((s) => s.loadAgent);
   const startBuilder = useAgentStore((s) => s.startBuilder);
@@ -51,12 +65,22 @@ export function App({ api, agentId }: { api: AgentApi; agentId: string }) {
         {/* Cross-link to the operations dashboard (P2-7). Separate entry/root, so a
             plain navigation rather than an in-app tab — keeps the two surfaces and
             their stores decoupled while making the dashboard discoverable. */}
-        <a
-          href="/dashboard.html"
-          className="ml-auto text-sm text-muted hover:text-ink"
-        >
+        <a href="/dashboard.html" className="ml-auto text-sm text-muted hover:text-ink">
           Operations dashboard ↗
         </a>
+        {user && (
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <span>{user.email}</span>
+            <button
+              onClick={() => {
+                logout().then(() => onSignedOut?.());
+              }}
+              className="rounded-md px-2 py-1 hover:bg-panel hover:text-ink"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </header>
 
       {error && (
