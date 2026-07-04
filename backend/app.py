@@ -24,12 +24,11 @@ Routes (all under /api so the Vite dev proxy forwards /api -> :8000 unchanged):
     POST      /api/agents/{id}/builder/messages   builder SSE (assembled here)
     POST      /api/agents/{id}/preview/messages   WS4 router
 
-Phase-1 shortcuts (clearly dev-only, swapped at real integration):
-  * AUTH is a fixed dev user — the WS2 `current_user` dependency is overridden and
-    the preview auth returns the same id. Real session auth drops in without route
-    changes (tenant scoping is already enforced in WS2 code, not here).
-  * One in-memory repo + a seeded demo agent (`agent-demo`) so the frontend's
-    default VITE_AGENT_ID resolves without a create step.
+AUTH: `build_app(user_dependency=...)` overrides the WS2 `current_user` dependency
+(and the preview auth) with a real session dependency — see `backend.auth` +
+`integrated_app.py`, which wires Google sign-in. Left unset, both fall back to a
+fixed dev user (standalone WS2 usage, tests) and a seeded demo agent (`agent-demo`)
+so the frontend's default VITE_AGENT_ID still resolves without a create step.
 """
 
 from __future__ import annotations
@@ -59,8 +58,7 @@ from backend.config_gate.api import (
 )
 from backend.config_gate.completeness import evaluate_status
 from backend.config_gate.errors import GateError as ConfigGateError
-from backend.config_gate.repository import InMemoryConfigRepository
-from backend.integration.persistence import build_config_repository, using_postgres
+from backend.integration.persistence import build_config_repository
 from backend.config_gate.service import AgentService
 
 # WS3 — builder loop
@@ -135,9 +133,13 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def _seed_demo_agent(repo: InMemoryConfigRepository) -> None:
+def _seed_demo_agent_if_missing(repo) -> None:
     """Seed a fixed-id draft owned by the dev user so the frontend's default agent
-    id resolves. Uses the schema defaults (platform layer already populated)."""
+    id resolves — idempotent (durable storage keeps `agent-demo` across restarts,
+    so only create it once), and only ever for the DEV_USER fallback: real accounts
+    create their own agents via login (see `backend.auth`)."""
+    if repo.get(DEMO_AGENT_ID, DEV_USER) is not None:
+        return
     now = datetime.now(timezone.utc)
     config = AgentConfig(
         meta=AgentMeta(
@@ -154,17 +156,20 @@ def _seed_demo_agent(repo: InMemoryConfigRepository) -> None:
     repo.create(config)
 
 
-def build_app() -> FastAPI:
+def build_app(user_dependency=None) -> FastAPI:
+    """`user_dependency` overrides WS2's mocked `current_user` (and the preview
+    auth) with a real one — e.g. the session dependency from `backend.auth`. Left
+    unset, both fall back to the fixed `DEV_USER` (standalone/dev-mock posture)."""
     app = FastAPI(title="voice-agent-studio — integrated (Phase 1)")
 
     # --- shared singletons ------------------------------------------------- #
     # WS6 wrapped by WS5: every builder/runtime model call is screened in/out.
     model = IntegrationScreeningWrapper(GeminiWrapper(), build_screener())
 
-    # Postgres when DATABASE_URL is set (persists across restarts), else in-memory.
+    # SQLite (default, durable, zero-config) or Postgres when DATABASE_URL is set.
     repo = build_config_repository()
-    if not using_postgres():
-        _seed_demo_agent(repo)  # dev convenience only — no seeded demo in a real DB
+    if user_dependency is None:
+        _seed_demo_agent_if_missing(repo)  # DEV_USER fallback only — real accounts create their own
     service = AgentService(repo)  # WS2 default (mock free-text screener) is fine for dev
 
     builder_sessions = InMemorySessionStore()
@@ -183,9 +188,15 @@ def build_app() -> FastAPI:
     app.include_router(create_gate_router(service), prefix="/api")
     _install_error_handler(app)  # ConfigGateError -> typed JSON error shape
 
-    # Phase-1 auth: fixed dev user. Overriding the dependency means no route needs
-    # to know about auth, and the frontend needn't send X-User-Id.
-    app.dependency_overrides[current_user] = lambda: DEV_USER
+    # Auth: overriding the dependency means no WS2 route needs to know about auth.
+    # Real accounts (backend.auth) pass their session dependency in; otherwise this
+    # falls back to the fixed dev user (standalone WS2 usage, tests). Both shapes
+    # take a single `Request` so `_preview_auth` below can call either uniformly.
+    def _default_user_dependency(request: Request) -> str:
+        return DEV_USER
+
+    resolve_user = user_dependency or _default_user_dependency
+    app.dependency_overrides[current_user] = resolve_user
 
     # --- builder SSE (assembled here; WS3 owns the loop, not the transport) - #
     @app.post("/api/agents/{agent_id}/builder/messages")
@@ -233,8 +244,8 @@ def build_app() -> FastAPI:
         except ConfigGateError:
             return None
 
-    async def _preview_auth(_request: Request) -> str:
-        return DEV_USER
+    async def _preview_auth(request: Request) -> str:
+        return resolve_user(request)
 
     app.include_router(
         build_preview_router(engine, _config_provider, _preview_auth), prefix="/api"

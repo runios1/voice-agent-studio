@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.config_gate.repository import InMemoryConfigRepository
+from backend.config_gate.repository import ConfigRepository, InMemoryConfigRepository
 from backend.config_gate.service import AgentService
 
 USER = "user-alice"
@@ -23,8 +23,15 @@ READY_PATCHES: list[tuple[str, object]] = [
 ]
 
 
-@pytest.fixture
-def repo() -> InMemoryConfigRepository:
+@pytest.fixture(params=["memory", "sqlite"])
+def repo(request, tmp_path) -> ConfigRepository:
+    """Every test in this suite runs against BOTH repository backends — proves the
+    SQLite impl (the new zero-config persistence default) behaves identically to
+    the in-memory reference against the same Protocol, with no test duplication."""
+    if request.param == "sqlite":
+        from backend.config_gate.sqlite_repository import SQLiteConfigRepository
+
+        return SQLiteConfigRepository(str(tmp_path / "config.db"))
     return InMemoryConfigRepository()
 
 

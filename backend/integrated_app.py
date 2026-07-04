@@ -13,10 +13,11 @@ app so the frontend's `/api` proxy target answers everything.
       + orchestrator + events routers  -> /api/campaigns, /api/events, /api/emergency-stop
       + the shared EventService sink    (so pause reflects via the stream — contract §4)
 
-Both surfaces share the same fixed dev identity (`dev-user`, user == tenant), so the
-seeded campaigns and their events are visible to the dashboard. Route namespaces are
-disjoint (`/agents…` vs `/campaigns…`/`/events…`), so nothing collides; the one shared
-name, `/api/health`, is kept from Phase-1.
+Both surfaces share the same real identity: whoever is signed in via Google
+(`backend.auth`) is `user == tenant`, so the campaigns/events they create are the
+ones the dashboard shows them. Route namespaces are disjoint (`/agents…` vs
+`/campaigns…`/`/events…`), so nothing collides; the one shared name, `/api/health`,
+is kept from Phase-1.
 
 Run:  set -a && source .env && set +a          # Phase-1 needs GEMINI_API_KEY
       python -m uvicorn backend.integrated_app:app --host 127.0.0.1 --port 8000
@@ -45,12 +46,17 @@ from backend.orchestrator.control_api import (
     create_router as create_orch_router,
     current_user,
 )
-from backend.phase2_app import DEV_USER, EventServiceSink
+from backend.phase2_app import EventServiceSink
 from backend.tool_registry.connections_router import (
     create_router as create_connections_router,
     current_tenant as connections_current_tenant,
     install_error_handler as install_connections_error_handler,
 )
+
+# Real accounts: Google sign-in + session cookie (replaces the fixed dev user).
+from backend.auth.router import create_router as create_auth_router
+from backend.auth.session import build_current_user_dependency
+from backend.integration.auth_wiring import build_google_login_provider
 
 from backend.integration.config_source import AgentServiceConfigSource
 from backend.integration.dialer import RealDialer
@@ -61,6 +67,7 @@ from backend.integration.runtime import (
     retell_configured,
 )
 from backend.integration.persistence import (
+    build_auth_store,
     build_event_service,
     build_orchestrator_repository,
 )
@@ -75,9 +82,15 @@ log = logging.getLogger("voice_agent_studio.integrated")
 
 
 def build_app() -> FastAPI:
-    # Base = the Phase-1 studio app (its routes, seeded demo agent, config-gate error
-    # handler, and current_user override are already installed inside build_studio_app).
-    app = build_studio_app()
+    # Real accounts: one session store + one dependency, shared by every workstream's
+    # mocked current_user/current_tenant below (each already enforces tenant isolation
+    # in code — only the id *source* changes, exactly as each workstream anticipated).
+    auth_store = build_auth_store()  # Postgres/SQLite when durable, in-memory in tests
+    current_user_id = build_current_user_dependency(auth_store)
+
+    # Base = the Phase-1 studio app (its routes, config-gate error handler, and
+    # current_user override are already installed inside build_studio_app).
+    app = build_studio_app(user_dependency=current_user_id)
     # Reuse the studio's already-built singletons (exposed on app.state): campaigns must
     # run the SAME agent the builder edits, and reuse the SAME screened model wrapper.
     service = app.state.agent_service
@@ -119,6 +132,19 @@ def build_app() -> FastAPI:
         ),
         prefix="/api",
     )
+    app.include_router(
+        create_auth_router(
+            auth_store,
+            build_google_login_provider(),
+            redirect_uri=f"{oauth_redirect_base}/api/auth/google/callback",
+            app_redirect_url=app_base_url,
+            # Dev convenience for a BRAND NEW real user: seed placeholder tool
+            # connections so mock calendar/email handlers run with no manual
+            # connect step (no-op once real providers are configured/connected).
+            on_login=tool_stack.ensure_dev_connections,
+        ),
+        prefix="/api",
+    )
     # P4-6 — live talking preview, Live-native (Phase 4 pivot): Gemini Live IS the
     # agent (audio-to-audio), driven by the compiled LiveAgentSpec + the per-agent
     # tool registry a real call uses, with output-transcription moderation as a net.
@@ -142,18 +168,16 @@ def build_app() -> FastAPI:
     install_events_error_handler(app)
     install_connections_error_handler(app)
 
-    # Phase-2 dev auth: same fixed identity as Phase-1 (user == tenant == "dev-user"),
-    # so the dashboard's tenant sees the seeded campaigns/events.
-    app.dependency_overrides[current_user] = lambda: DEV_USER
-    app.dependency_overrides[current_tenant] = lambda: DEV_USER
-    app.dependency_overrides[connections_current_tenant] = lambda: DEV_USER
+    # Real accounts: user == tenant == whoever the session cookie resolves to.
+    app.dependency_overrides[current_user] = current_user_id
+    app.dependency_overrides[current_tenant] = current_user_id
+    app.dependency_overrides[connections_current_tenant] = current_user_id
 
     @app.on_event("startup")
     async def _prime() -> None:
-        # Dev: seed placeholder tool connections so the MOCK calendar/email clients run
-        # before real OAuth is wired (no-op once real providers are configured). Nothing
-        # auto-dials on boot — users authorize their OWN campaigns (real-product behavior).
-        tool_stack.ensure_dev_connections(DEV_USER)
+        # Nothing auto-dials on boot — users authorize their OWN campaigns
+        # (real-product behavior). Per-user dev tool-connection seeding happens at
+        # login (see on_login above), not here (there's no fixed dev user anymore).
         log.info(
             "integrated app ready — phone transport=%s",
             "retell" if retell_configured() else "mock",

@@ -20,6 +20,13 @@ build/
 credentials.json
 service-account*.json
 
+# Local SQLite persistence (config/orchestrator/events/auth) — the zero-config
+# dev default when DATABASE_URL is unset.
+.data/
+*.db
+*.db-wal
+*.db-shm
+
 # OS / editor
 .DS_Store
 .idea/
