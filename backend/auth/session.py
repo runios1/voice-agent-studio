@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import os
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
+from starlette.requests import HTTPConnection
 
 from backend.auth.store import AuthStore
 
@@ -24,8 +25,12 @@ def cookie_secure() -> bool:
 
 
 def build_current_user_dependency(store: AuthStore):
-    def current_user_id(request: Request) -> str:
-        token = request.cookies.get(SESSION_COOKIE)
+    # Typed as HTTPConnection (the shared base of Request AND WebSocket) so the SAME
+    # dependency authenticates both HTTP routes and WebSocket routes. A `Request`-typed
+    # dep is never injected on a WS route, which broke every authed WS (e.g. the live
+    # preview) with a missing-argument TypeError.
+    def current_user_id(conn: HTTPConnection) -> str:
+        token = conn.cookies.get(SESSION_COOKIE)
         user_id = store.get_session_user(token) if token else None
         if not user_id:
             raise HTTPException(status_code=401, detail="Not authenticated.")
