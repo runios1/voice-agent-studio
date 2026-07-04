@@ -77,7 +77,8 @@ function FieldEditor({
   onCommit: (path: string, value: unknown) => void;
   meta: ReturnType<typeof metaFor>;
 }) {
-  const asText = value == null ? "" : String(value);
+  const asText =
+    value == null || typeof value === "object" ? "" : String(value);
   const [draft, setDraft] = useState(asText);
 
   // keep the local draft in sync when the config changes underneath us
@@ -87,6 +88,29 @@ function FieldEditor({
   const commit = () => {
     if (draft !== asText) onCommit(path, draft);
   };
+
+  if (meta.editor.kind === "toggle") {
+    // The row's value is the whole automation block; toggle its boolean sub-field
+    // (default `enabled`) and commit to that nested path so the gate sees a leaf.
+    const field = meta.editor.field ?? "enabled";
+    const on = !!(value as Record<string, unknown> | undefined)?.[field];
+    return (
+      <div className="mt-1">
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            data-testid={`input-${path}`}
+            checked={on}
+            onChange={(e) => onCommit(`${path}.${field}`, e.target.checked)}
+          />
+          <span className="text-muted">{on ? "On" : "Off"}</span>
+        </label>
+        {meta.editor.hint && (
+          <p className="mt-1 text-xs text-muted">{meta.editor.hint}</p>
+        )}
+      </div>
+    );
+  }
 
   if (meta.editor.kind === "select") {
     return (

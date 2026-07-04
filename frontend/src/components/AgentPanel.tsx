@@ -24,8 +24,17 @@ export function AgentPanel() {
   if (!config) return null;
 
   const platformFields = policy.filter((p) => p.owner_layer === "platform");
+  // Capability switches (calendar/email automation) live in their own always-visible
+  // section — they're toggles the user must be able to FIND and flip, not interview
+  // answers that materialize once decided. Kept out of the progressive-disclosure
+  // list below so they don't depend on `materialized` (and so an unenabled capability
+  // still shows an off switch instead of hiding).
+  const capabilityFields = policy.filter((p) => p.path.startsWith("automation."));
   const userFields = policy.filter(
-    (p) => p.owner_layer === "user" && materialized[p.path],
+    (p) =>
+      p.owner_layer === "user" &&
+      materialized[p.path] &&
+      !p.path.startsWith("automation."),
   );
   const requiredTotal = policy.filter((p) => p.required_for_ready).length;
   const requiredDone = policy.filter(
@@ -71,6 +80,14 @@ export function AgentPanel() {
             userFields.map((p: FieldPolicy) => <FieldRow key={p.path} policy={p} />)
           )}
         </Section>
+
+        {capabilityFields.length > 0 && (
+          <Section title="Capabilities">
+            {capabilityFields.map((p: FieldPolicy) => (
+              <FieldRow key={p.path} policy={p} />
+            ))}
+          </Section>
+        )}
 
         {config.wishlist.length > 0 && (
           <Section title="Noted for later (not active)">

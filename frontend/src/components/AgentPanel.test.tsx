@@ -56,3 +56,18 @@ describe("AgentPanel — progressive disclosure (D-UX)", () => {
     expect(screen.getByText(/appear here as you describe/i)).toBeInTheDocument();
   });
 });
+
+describe("AgentPanel — capabilities (always-visible toggles)", () => {
+  it("shows the calendar/email capability toggles even when unenabled and undecided", () => {
+    render(<AgentPanel />);
+    // Capability switches must be discoverable up front — not hidden behind
+    // progressive disclosure like interview answers are.
+    expect(screen.getByText("Capabilities")).toBeInTheDocument();
+    const calendar = screen.getByTestId("field-automation.calendar");
+    expect(calendar).toHaveTextContent("Calendar booking");
+    const box = calendar.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(box).not.toBeNull();
+    expect(box.checked).toBe(false); // seeded draft has it off
+    expect(screen.getByTestId("field-automation.email")).toBeInTheDocument();
+  });
+});

@@ -36,9 +36,19 @@ BUILDER_TOOLS: list[ToolDef] = [
             "confirm before booking, e.g. ['email', 'preferred_time'] — replaces the "
             "whole list), conversation.closing.confirmation_template_id (an approved "
             "template id from automation.email.template_ids), conversation.closing."
-            "sign_off (free-text closing line). `path` is a dotted path into the "
-            "agent config; `value` is the new value. Do NOT use for locked platform "
-            "guardrails — they will be rejected."
+            "sign_off (free-text closing line). "
+            "TURNING ON CAPABILITIES: describing booking or email in the closing flow "
+            "does NOT give the agent those abilities — you must ENABLE them here. To "
+            "let the agent actually check availability and hold meetings on the "
+            "connected calendar, set automation.calendar.enabled (bool) to true. To "
+            "let it send a follow-up/confirmation email, set automation.email.enabled "
+            "(bool) to true and automation.email.template_ids (list of approved "
+            "template ids) to the templates it may send. Whenever the user says the "
+            "agent should book meetings or send an email, set the matching "
+            "automation.*.enabled flag — otherwise the capability stays off and the "
+            "agent will truthfully say it has no calendar/email access. "
+            "`path` is a dotted path into the agent config; `value` is the new value. "
+            "Do NOT use for locked platform guardrails — they will be rejected."
         ),
         parameters={
             "type": "object",

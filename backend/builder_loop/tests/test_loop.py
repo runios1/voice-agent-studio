@@ -138,6 +138,41 @@ def test_triage_closing_flow_is_recorded_via_set_field(fresh_config):
     assert set(remaining_gaps(config)) == set(REQUIRED_PATHS)
 
 
+def test_book_meeting_cascades_calendar_enablement(fresh_config):
+    # Regression: turning on the "book a meeting" closing step must also switch the
+    # calendar CAPABILITY on. Otherwise automation.calendar.enabled stays false, the
+    # runtime declares no calendar tool, and the agent truthfully reports it has no
+    # calendar access — the exact bug this lockstep fixes.
+    loop, gate = make_loop(
+        [resp("Got it.", [tc(tools.SET_FIELD, path="conversation.closing.book_meeting", value=True)])],
+        fresh_config,
+    )
+    events = collect(loop, "Once qualified, book a meeting on my calendar.")
+
+    config = gate.get_config(AGENT_ID)
+    assert config.conversation.closing.book_meeting is True
+    assert config.automation.calendar.enabled is True  # cascaded on
+    # Both patches surface to the UI so the panel reflects the flipped capability.
+    emitted = {(p.path, p.value) for p in patches(events)}
+    assert ("conversation.closing.book_meeting", True) in emitted
+    assert ("automation.calendar.enabled", True) in emitted
+
+
+def test_book_meeting_cascade_is_idempotent_when_already_enabled(fresh_config):
+    # If calendar is already on, setting book_meeting again emits only the one patch —
+    # no redundant calendar re-enable.
+    fresh_config.automation.calendar.enabled = True
+    loop, gate = make_loop(
+        [resp("Sure.", [tc(tools.SET_FIELD, path="conversation.closing.book_meeting", value=True)])],
+        fresh_config,
+    )
+    events = collect(loop, "Book meetings once they're qualified.")
+
+    calendar_patches = [p for p in patches(events) if p.path == "automation.calendar.enabled"]
+    assert calendar_patches == []
+    assert gate.get_config(AGENT_ID).conversation.closing.book_meeting is True
+
+
 def test_triage_harmless_flavor_goes_to_freetext_pocket(fresh_config):
     loop, gate = make_loop(
         [resp("Cute!", [tc(tools.SET_FIELD, path="conversation.persona.style_notes", value="always sign off with 'onward!'")])],

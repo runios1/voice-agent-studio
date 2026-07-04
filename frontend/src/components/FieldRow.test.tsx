@@ -18,6 +18,12 @@ const lockedDisclosure: FieldPolicy = {
   mutability: "locked",
   required_for_ready: false,
 };
+const calendarCapability: FieldPolicy = {
+  path: "automation.calendar",
+  owner_layer: "user",
+  mutability: "open",
+  required_for_ready: false,
+};
 
 async function loadStore(onPatch?: (...a: unknown[]) => void) {
   useAgentStore.setState({
@@ -60,5 +66,25 @@ describe("FieldRow manual editing", () => {
     const row = screen.getByTestId("field-conversation.disclosure.must_disclose_ai");
     expect(row.querySelector("input,select,textarea")).toBeNull();
     expect(row).toHaveTextContent("Yes"); // must_disclose_ai === true
+  });
+
+  it("renders a capability block as an off toggle and enables it via its .enabled leaf", async () => {
+    const onPatch = vi.fn();
+    await loadStore(onPatch);
+    render(<FieldRow policy={calendarCapability} />);
+
+    // seeded draft has calendar disabled -> unchecked
+    const box = screen.getByTestId("input-automation.calendar") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+
+    await userEvent.click(box); // flip on
+
+    await waitFor(() =>
+      expect(onPatch).toHaveBeenCalledWith(
+        "agent-demo",
+        "automation.calendar.enabled", // patches the boolean leaf, not the object
+        true,
+      ),
+    );
   });
 });

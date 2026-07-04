@@ -10,6 +10,9 @@ export type Editor =
   | { kind: "text" }
   | { kind: "textarea" }
   | { kind: "select"; options: { value: string; label: string }[] }
+  // an on/off switch over a boolean sub-field of the path's object (default
+  // `.enabled`) — used for capability blocks like calendar/email automation.
+  | { kind: "toggle"; field?: string; hint?: string }
   | { kind: "readonly" }; // lists/objects: display-only in Phase 1 (edit via chat)
 
 export interface FieldMeta {
@@ -52,8 +55,20 @@ export const FIELD_META: Record<string, FieldMeta> = {
     label: "AI disclosure script",
     editor: { kind: "textarea" },
   },
-  "automation.calendar": { label: "Calendar booking", editor: { kind: "readonly" } },
-  "automation.email": { label: "Email follow-up", editor: { kind: "readonly" } },
+  "automation.calendar": {
+    label: "Calendar booking",
+    editor: {
+      kind: "toggle",
+      hint: "Lets the agent check availability and hold meetings. Connect your Google Calendar under Connections for it to work on a live call.",
+    },
+  },
+  "automation.email": {
+    label: "Email follow-up",
+    editor: {
+      kind: "toggle",
+      hint: "Lets the agent send an approved confirmation/follow-up email after a call.",
+    },
+  },
 
   // platform guardrails (read-only, shown in the locked section)
   "guardrails.ai_disclosure_required": {
