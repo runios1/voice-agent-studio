@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import clsx from "clsx";
 import type { AgentApi } from "../api/agentApi";
 import type { AuthUser } from "../auth/authApi";
-import { logout } from "../auth/authApi";
+import { beginGoogleLogin, logout } from "../auth/authApi";
 import { useAgentStore } from "../store/agentStore";
 import { useConnectionsStore } from "../connections/connectionsStore";
 import { BuilderChat } from "./BuilderChat";
@@ -87,18 +87,29 @@ export function App({
             Operations ↗
           </a>
           <ThemeToggle />
-          {user && (
-            <div className="flex items-center gap-2 border-l border-line/70 pl-2 text-sm text-muted">
-              <span className="hidden md:inline">{user.email}</span>
-              <button
-                onClick={() => {
-                  logout().then(() => onSignedOut?.());
-                }}
-                className="rounded-full px-3 py-1.5 transition-colors hover:bg-panel hover:text-ink"
-              >
-                Sign out
-              </button>
-            </div>
+          {user?.guest ? (
+            // Open/demo mode: nobody is signed in, everyone shares the public workspace.
+            // Offer sign-in (own workspace + real connections) instead of sign-out.
+            <button
+              onClick={beginGoogleLogin}
+              className="rounded-full border-l border-line/70 px-3 py-1.5 text-sm text-muted transition-colors hover:bg-panel hover:text-ink"
+            >
+              Sign in with Google
+            </button>
+          ) : (
+            user && (
+              <div className="flex items-center gap-2 border-l border-line/70 pl-2 text-sm text-muted">
+                <span className="hidden md:inline">{user.email}</span>
+                <button
+                  onClick={() => {
+                    logout().then(() => onSignedOut?.());
+                  }}
+                  className="rounded-full px-3 py-1.5 transition-colors hover:bg-panel hover:text-ink"
+                >
+                  Sign out
+                </button>
+              </div>
+            )
           )}
         </div>
       </header>

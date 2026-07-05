@@ -34,12 +34,18 @@ def create_router(
     redirect_uri: str,
     app_redirect_url: str = "/",
     on_login: Optional[Callable[[str], None]] = None,
+    public_user_id: Optional[str] = None,
 ) -> APIRouter:
     """`redirect_uri` is the backend's OWN callback URL (must match what's
     registered with the Google OAuth client); `app_redirect_url` is where the
     browser bounces back to in the app once login has completed. `on_login`
     (optional) fires with the user id right after a session is created — e.g. to
-    seed dev tool-connection placeholders for a brand-new real user."""
+    seed dev tool-connection placeholders for a brand-new real user.
+
+    `public_user_id` (optional) is the "open"/demo posture: with no session, `/auth/me`
+    reports the shared public user as a guest (instead of 401) so the frontend opens the
+    app rather than gating on login — while sign-in stays available for anyone who wants
+    their own workspace. Left None = login required."""
     router = APIRouter()
     # state -> expiry (monotonic clock); single-use, swept lazily on each new login.
     pending: dict[str, float] = {}
@@ -93,11 +99,27 @@ def create_router(
         token = request.cookies.get(SESSION_COOKIE)
         user_id = store.get_session_user(token) if token else None
         if not user_id:
+            if public_user_id is not None:
+                # Open/demo mode: anonymous visitor == the shared public workspace.
+                # `guest: True` lets the UI offer "Sign in" instead of "Sign out".
+                return {
+                    "id": public_user_id,
+                    "email": "",
+                    "name": "Guest",
+                    "picture": None,
+                    "guest": True,
+                }
             raise HTTPException(status_code=401, detail="Not authenticated.")
         user = store.get_user(user_id)
         if user is None:
             raise HTTPException(status_code=401, detail="Not authenticated.")
-        return {"id": user.id, "email": user.email, "name": user.name, "picture": user.picture}
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "picture": user.picture,
+            "guest": False,
+        }
 
     @router.post("/auth/logout")
     def logout(request: Request, response: Response):

@@ -8,6 +8,10 @@ export interface AuthUser {
   email: string;
   name: string;
   picture: string | null;
+  /** Open/demo mode: this is the shared public user, signed in as nobody. The UI
+   * offers "Sign in" (to get your own workspace) rather than "Sign out". Absent /
+   * false in login mode. */
+  guest?: boolean;
 }
 
 /** GET /api/auth/me — null when not signed in (401), never throws for that case. */

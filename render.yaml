@@ -21,6 +21,11 @@ services:
       # Served over https on Render -> the session cookie must be Secure.
       - key: COOKIE_SECURE
         value: "true"
+      # Login posture: "login" (require sign-in, default) or "open" (demo — anonymous
+      # visitors share one public workspace; sign-in still available). Flip to "open"
+      # in the Render dashboard for a no-login demo; no redeploy of code needed.
+      - key: AUTH_MODE
+        value: "login"
       # Google sign-in + Calendar/Gmail tool-connect (same OAuth client).
       # Register BOTH callback paths on it, on your <app>.onrender.com origin:
       #   /api/auth/google/callback   and   /api/oauth/callback

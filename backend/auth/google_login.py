@@ -111,14 +111,13 @@ class FakeGoogleLoginProvider:
     the fake `code` so tests can drive the whole login flow without Google."""
 
     def authorization_url(self, redirect_uri: str, state: str) -> str:
-        params = {
-            "client_id": "fake-client-id",
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": " ".join(LOGIN_SCOPES),
-            "state": state,
-        }
-        return f"https://accounts.test/o/oauth2/v2/auth?{urlencode(params)}"
+        # No real consent screen exists in dev/CI, so bounce STRAIGHT back to our own
+        # callback with a canned code: a browser "Sign in" then completes in one hop as a
+        # stable dev identity (no Google, no unreachable accounts.test page). Tests drive
+        # the callback directly and only read `state` off this URL, so the self-completing
+        # shape doesn't change their behavior. Only ever used when GOOGLE_OAUTH_CLIENT_ID
+        # is unset (real deployments always use RealGoogleLoginProvider).
+        return f"{redirect_uri}?{urlencode({'code': 'dev', 'state': state})}"
 
     async def exchange_identity(self, code: str, redirect_uri: str) -> GoogleIdentity:
         if not code:

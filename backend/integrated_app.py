@@ -100,7 +100,15 @@ def build_app() -> FastAPI:
     # mocked current_user/current_tenant below (each already enforces tenant isolation
     # in code — only the id *source* changes, exactly as each workstream anticipated).
     auth_store = build_auth_store()  # Postgres/SQLite when durable, in-memory in tests
-    current_user_id = build_current_user_dependency(auth_store)
+    # AUTH_MODE=open (demo posture): login is NOT required — anonymous visitors share one
+    # public workspace, but Google sign-in stays mounted so anyone who wants their OWN
+    # isolated space (and real tool connections) can still sign in. AUTH_MODE=login
+    # (default) keeps today's behavior: a valid session or 401. It's a single env flip.
+    open_access = os.getenv("AUTH_MODE", "login").strip().lower() == "open"
+    public_user_id = os.getenv("PUBLIC_USER_ID", "public-user")
+    current_user_id = build_current_user_dependency(
+        auth_store, fallback_user_id=public_user_id if open_access else None
+    )
 
     # Base = the Phase-1 studio app (its routes, config-gate error handler, and
     # current_user override are already installed inside build_studio_app).
@@ -184,6 +192,9 @@ def build_app() -> FastAPI:
             # real providers are connected) THEN enable any already-connected
             # capability on the user's agents (self-heals pre-existing agents).
             on_login=_on_login,
+            # Open mode: /auth/me reports this shared user as a guest instead of 401,
+            # so the frontend opens the app rather than gating on the login screen.
+            public_user_id=public_user_id if open_access else None,
         ),
         prefix="/api",
     )
@@ -226,9 +237,14 @@ def build_app() -> FastAPI:
     async def _prime() -> None:
         # Nothing auto-dials on boot — users authorize their OWN campaigns
         # (real-product behavior). Per-user dev tool-connection seeding happens at
-        # login (see on_login above), not here (there's no fixed dev user anymore).
+        # login (see on_login above), not here (there's no fixed dev user anymore)...
+        # EXCEPT the shared public user in open mode, which never triggers a login:
+        # seed its dev connections + capabilities once at startup so booking works.
+        if open_access:
+            _on_login(public_user_id)
         log.info(
-            "integrated app ready — phone transport=%s",
+            "integrated app ready — auth mode=%s, phone transport=%s",
+            "open" if open_access else "login",
             "retell" if retell_configured() else "mock",
         )
 

@@ -69,7 +69,9 @@ export function Root({ api }: { api: AgentApi }) {
       api={api}
       agentId={status.agentId}
       user={status.user}
-      onSignedOut={() => setStatus({ kind: "signed_out", error: null })}
+      // Reload rather than force the login screen: in open/demo mode a fresh session
+      // check drops back to the shared guest workspace; in login mode it 401s → login.
+      onSignedOut={() => window.location.reload()}
     />
   );
 }
